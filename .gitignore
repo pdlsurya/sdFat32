@@ -1,52 +1,46 @@
-# Prerequisites
-*.d
+# OS-specific files
+# macOS
+.DS_Store
+**/.DS_Store
+.AppleDouble
+.LSOverride
 
-# Object files
-*.o
-*.ko
-*.obj
-*.elf
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
 
-# Linker output
-*.ilk
-*.map
-*.exp
+# Linux
+*~
 
-# Precompiled Headers
-*.gch
-*.pch
+# IDEs and editors
+.vscode/
+*.swp
+*.swo
+*.bak
+*.tmp
 
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
 
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
+# Build system directories
+**/build.sh
+**/build/
+/bin/
+/obj/
+/debug/
+/release/
 
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
-
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
+# CMake (if used)
+CMakeLists.txt.user
+CMakeCache.txt
+CMakeFiles
+CMakeScripts
+Testing
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps
+CMakeUserPresets.json
