@@ -34,7 +34,7 @@
 
 EXTERNC void serial_printf(const char *format, ...)
 {
-    char buffer[256];
+    char buffer[256]="";
     va_list args;
     va_start(args, format);
     vsprintf(buffer, format, args);

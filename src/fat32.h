@@ -52,9 +52,13 @@ extern "C"
     typedef struct
     {
         uint32_t Cluster;
+        uint32_t entryIndex;
+        uint32_t lfnEntryCluster;
+        uint32_t lfnEntryIndex;
         uint8_t sectorIndex;
-        uint8_t entryIndex;
         uint8_t LFN_EntCnt;
+        uint8_t lfnEntrySectorIndex;
+
     } fileEntInf_t;
 
     typedef struct
@@ -68,8 +72,6 @@ extern "C"
         uint32_t FSI_TrailSig;
 
     } FSInfo_t;
-
-    extern char fileName[128];
 
     typedef struct
     {
@@ -124,35 +126,39 @@ extern "C"
         fileEntInf_t fileEntInf;
     } file;
 
-    extern char fileName[128]; ///< Global variable to store file name
+    bool fat32Init();
+
+    file fileExists(file *pFolder, const char *filename);
+
+    file fileOpen(const char *path, const char *filename);
+
+    uint8_t fileReadByte(file *pFile);
+
+    bool fileWrite(file *pFile, const char *data);
+
+    bool fileDelete(const char *path, const char *filename);
+
+    file fileGetNext(file *pFile);
+
+    char *fileGetName(file *pFile);
+
+    file createDirectory(const char *path, const char *dirName);
+
+    bool listDirectory(const char *path);
+
+    void listDirectoryRecursive(file *pFolder, uint8_t tab);
 
     /**
-     * @brief Check if the given file is a free entry
-     *
-     * This function checks the first character of the file name to determine if the
-     * file is a free entry by verifying that the first character is 0xE5.
-     *
+     * @brief Get the Long File Name (LFN) entry count for a file
      * @param pFile Pointer to file structure
-     * @return true if the file is a free entry, false otherwise
-     */
-    static inline bool fileIsFreeEntry(file *pFile)
-    {
-        return ((uint8_t)(pFile->DIR_Name[0]) == 0xE5);
-    }
-
-    /**
-     * @brief Check if a file is a long file name (LFN) entry
+     * @return LFN entry count
      *
-     * This function checks if a file is a long file name (LFN) entry by verifying
-     * that the first character of the file name is 0x40 and the file attribute is
-     * set to ATTR_LONG_FILE_NAME.
-     *
-     * @param pFile Pointer to file structure
-     * @return true if the file is an LFN entry, false otherwise
+     * This function returns the LFN entry count for a file by accessing the
+     * LFN_EntCnt member of the file structure.
      */
-    static inline bool fileIsLfnEntry(file *pFile)
+    static inline uint8_t fileLfnEntryCnt(file *pFile)
     {
-        return (((pFile->DIR_attr & ATTR_LONG_NAME_MASK) == ATTR_LONG_FILE_NAME) && (((uint8_t)pFile->DIR_Name[0] & 0xF0) == 0x40));
+        return pFile->fileEntInf.LFN_EntCnt;
     }
 
     /**
@@ -163,7 +169,9 @@ extern "C"
     static inline uint32_t fileStartCluster(file *pFile)
     {
         uint32_t startClus = (uint32_t)pFile->DIR_FstClusLO;
+
         startClus |= ((uint32_t)(pFile->DIR_FstClusHI)) << 16;
+
         return startClus;
     }
 
@@ -206,7 +214,8 @@ extern "C"
      */
     static inline bool fileIsValid(file *pFile)
     {
-        return (fileStartCluster(pFile) != 0) && !(fileIsEndOfDir(pFile) || (fileName[0] == '.' && fileName[1] == '_'));
+        const char *name = fileGetName(pFile);
+        return ((fileStartCluster(pFile) != 0) && !(fileIsEndOfDir(pFile) || (name[0] == '.' && name[1] == '_')));
     }
 
     /**
@@ -220,19 +229,6 @@ extern "C"
     static inline uint32_t fileSize(file *pFile)
     {
         return pFile->DIR_FileSize;
-    }
-
-    /**
-     * @brief Get the Long File Name (LFN) entry count for a file
-     * @param pFile Pointer to file structure
-     * @return LFN entry count
-     *
-     * This function returns the LFN entry count for a file by accessing the
-     * LFN_EntCnt member of the file structure.
-     */
-    static inline uint8_t fileLfnEntCnt(file *pFile)
-    {
-        return pFile->fileEntInf.LFN_EntCnt;
     }
 
     /**
@@ -268,28 +264,6 @@ extern "C"
         // Reset the file structure to zero
         memset(pFile, 0, sizeof(file));
     }
-
-    bool fat32Init();
-
-    file fileExists(file *pFolder, const char *filename);
-
-    file fileOpen(const char *path, const char *filename);
-
-    void fileClose(file *pFile);
-
-    uint8_t fileReadByte(file *pFile);
-
-    bool fileWrite(file *pFile, const char *data);
-
-    bool fileDelete(const char *path, const char *filename);
-
-    file fileGetNext(file *pFile);
-
-    file createDirectory(const char *path, const char *dirName);
-
-    bool listDirectory(const char *path);
-
-    void listDirectoryRecursive(file *pFolder, uint8_t tab);
 
 #ifdef __cplusplus
 }

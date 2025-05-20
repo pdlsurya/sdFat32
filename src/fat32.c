@@ -40,10 +40,6 @@ static uint32_t RootDirSectors;
 static uint32_t DataStartSector;
 static uint32_t DataSectorsCnt;
 
-static uint8_t fileNameIndex;
-
-char fileName[128] = "";
-
 /**
  * @brief Reads boot sector parameters from SD card and stores it in params global variable
  *
@@ -163,9 +159,38 @@ static void fatSetNextClus(uint32_t fatThisClus, uint32_t fatNextCluster)
  *          cluster index. The formula used is:
  *          DataStartSector + (cluster_index - 2) * params.BPB_SecPerClus
  */
-static inline uint32_t startSecOfClus(uint32_t cluster_index)
+static inline uint32_t startSectorOfCluster(uint32_t cluster_index)
 {
     return (DataStartSector + (cluster_index - 2) * params.BPB_SecPerClus);
+}
+
+/**
+ * @brief Check if a file is a long file name (LFN) entry
+ *
+ * This function checks if a file is a long file name (LFN) entry by verifying
+ * that the first character of the file name is 0x40 and the file attribute is
+ * set to ATTR_LONG_FILE_NAME.
+ *
+ * @param pFile Pointer to file structure
+ * @return true if the file is an LFN entry, false otherwise
+ */
+static inline bool fileIsLfnEntry(file *pFile)
+{
+    return (((pFile->DIR_attr & ATTR_LONG_NAME_MASK) == ATTR_LONG_FILE_NAME) && (((uint8_t)pFile->DIR_Name[0] & 0xF0) == 0x40));
+}
+
+/**
+ * @brief Check if the given file is a free entry
+ *
+ * This function checks the first character of the file name to determine if the
+ * file is a free entry by verifying that the first character is 0xE5.
+ *
+ * @param pFile Pointer to file structure
+ * @return true if the file is a free entry, false otherwise
+ */
+static inline bool fileIsFreeEntry(file *pFile)
+{
+    return ((uint8_t)(pFile->DIR_Name[0]) == 0xE5);
 }
 
 /**
@@ -183,6 +208,400 @@ static inline bool fileIsClosed(file *pFile)
     if ((fileStartCluster(pFile) == 0) && (pFile->DIR_FileSize == 0))
         return true;
     return false;
+}
+
+/**
+ * @brief Check if the next entry in the directory exists
+ *
+ * This function checks if the next entry in the directory exists. If the next
+ * entry exists, it increments the entry index and returns true. Otherwise, it
+ * returns false.
+ *
+ * @param[in,out] pFolder pointer to the folder
+ * @param[in,out] sectorIndex sector index of the next entry
+ * @param[in,out] currentCluster current cluster index
+ * @return true if the next entry exists, false otherwise
+ */
+static bool dirNextEntryExists(file *pFolder, uint8_t *sectorIndex, uint32_t *currentCluster)
+{
+    pFolder->entryIndex++; // Increment the entry index
+
+    if ((pFolder->entryIndex % 16) == 0) // If reached the end of the sector, read the next sector
+    {
+        // Increment the sector index
+        (*sectorIndex)++;
+
+        if (*sectorIndex == params.BPB_SecPerClus) // If the sector index is equal to the number of sectors per cluster
+        {
+            // Reset the sector index
+            *sectorIndex = 0;
+            // Move to the next cluster in the FAT
+            *currentCluster = fatNextCluster(*currentCluster);
+            if (*currentCluster >= FAT_EOC) // If the end of the FAT is reached, return false
+            {
+                pFolder->entryIndex = 2;
+                return false;
+            }
+        }
+        // Read the next sector
+        sd_read_sector(startSectorOfCluster(*currentCluster) + *sectorIndex, sdBuffer);
+    }
+
+    return true;
+}
+
+/**
+ * @brief Get the file name from a given file structure.
+ *
+ * This function gets the file name from a given file structure. If the file has
+ * long file name entries, it concatenates the long file name entries to form
+ * the file name. Otherwise, it copies the file name body and extension from the
+ * directory entry.
+ *
+ * @param[in] pFile Pointer to the file structure.
+ * @return A pointer to a string containing the file name.
+ */
+char *fileGetName(file *pFile)
+{
+    static char fileName[128];
+    uint8_t nameIndx = 0;
+
+    memset(fileName, 0, sizeof(fileName)); // Clear the file name buffer
+
+    if (pFile->fileEntInf.LFN_EntCnt > 0)
+    {
+        uint8_t lfnEntryCnt = pFile->fileEntInf.LFN_EntCnt;
+        uint32_t currentCluster = pFile->fileEntInf.lfnEntryCluster;
+        uint8_t sectorIndex = pFile->fileEntInf.lfnEntrySectorIndex;
+        uint32_t entryIndex = pFile->fileEntInf.lfnEntryIndex;
+
+        char (*tempName)[13] = (char (*)[13])fileName;
+
+        while (lfnEntryCnt) // Loop until all long filename entries are processed
+        {
+            uint8_t tempNameIndex = 0;                                               // Initialize the temporary name index
+            LFN_entry_t *entry = (LFN_entry_t *)(sdBuffer + (entryIndex % 16) * 32); // Get the long filename entry at the current index
+
+            for (uint8_t i = 0; i < 10; i += 2)
+            { // Copy the characters from the long filename entry to the temporary name array
+                tempName[lfnEntryCnt - 1][tempNameIndex++] = entry->LDIR_Name1[i];
+            }
+
+            for (uint8_t i = 0; i < 12; i += 2)
+            {
+                tempName[lfnEntryCnt - 1][tempNameIndex++] = entry->LDIR_Name2[i];
+            }
+
+            for (uint8_t i = 0; i < 4; i += 2)
+            {
+                tempName[lfnEntryCnt - 1][tempNameIndex++] = entry->LDIR_Name3[i];
+            }
+
+            lfnEntryCnt--;
+
+            entryIndex++;
+
+            if (entryIndex % 16 == 0) // If reached the end of the sector, read the next sector
+            {
+                sectorIndex++;
+                if (sectorIndex == params.BPB_SecPerClus) // If the sector index is equal to the number of sectors per cluster
+                {
+                    sectorIndex = 0;
+                    currentCluster = fatNextCluster(currentCluster); // Move to the next cluster in the FAT
+                }
+                sd_read_sector(startSectorOfCluster(currentCluster) + sectorIndex, sdBuffer); // Read the next sector
+            }
+        }
+    }
+    else
+    {
+        for (uint8_t index = 0; index < 8; index++)
+        {
+            // If the character is a space, break out of the loop
+            if (pFile->DIR_Name[index] == ' ')
+                break;
+
+            // Every character in the file name body is lower case
+            if (pFile->DIR_NTRes & 0x08)
+            {
+                if ((pFile->DIR_Name[index] >= 'A') && (pFile->DIR_Name[index] <= 'Z'))
+                {
+                    fileName[nameIndx++] = pFile->DIR_Name[index] + 32;
+                }
+                else
+                    fileName[nameIndx++] = pFile->DIR_Name[index];
+            }
+            else
+                fileName[nameIndx++] = pFile->DIR_Name[index];
+        }
+
+        // If the file is not a directory, append a dot (.) to the end of the name
+        if (!fileIsDirectory(pFile))
+        {
+            if (pFile->DIR_ext[0] != ' ')
+            {
+                fileName[nameIndx++] = '.';
+                for (uint8_t index = 0; index < 3; index++)
+                {
+                    fileName[nameIndx++] = (pFile->DIR_ext[index] == ' ') ? '\0' : pFile->DIR_ext[index] + 32;
+                }
+            }
+        }
+    }
+
+    return fileName;
+}
+
+/**
+ * @brief Extracts the file extension from a given file name.
+ *
+ * @param[in] file_name The file name from which to extract the extension.
+ * @return A pointer to a string containing the file extension.
+ */
+char *fileGetExtension(char *file_name)
+{
+    static char ext[5] = ""; /**< Buffer to store the file extension. */
+
+    memset(ext, 0, sizeof(ext)); /**< Clear the buffer. */
+
+    uint8_t idx = 0; /**< Index of the current character in the file name. */
+
+    /**
+     * Loop until we reach the dot (.) or the end of the string.
+     */
+    while (file_name[idx] != '.')
+    {
+        idx++;
+        /**
+         * If we have reached the end of the string without finding a dot,
+         * return an empty string.
+         */
+        if (idx == strlen(file_name))
+        {
+            return ext;
+        }
+    }
+
+    /**
+     * Copy the characters after the dot to the ext buffer.
+     */
+    strcpy(ext, &file_name[idx + 1]);
+
+    return ext;
+}
+
+/**
+ * @brief Get the root directory entry
+ *
+ * @return root directory entry
+ */
+static file getRootDir()
+{
+    // Read the first sector of the root directory
+    sd_read_sector(startSectorOfCluster(params.BPB_RootClus), sdBuffer);
+
+    // Get the root directory entry from the sector
+    file root = *((file *)&sdBuffer[0]);
+
+    // Initialize the root directory's cluster index and entry index
+    root.DIR_FstClusLO = 2;
+    root.entryIndex = 1;
+
+    return root;
+}
+
+/**
+ * @brief Get the next file in the folder
+ *
+ * @param[in] pFolder pointer to the folder
+ * @return next file in the folder
+ */
+file fileGetNext(file *pFolder)
+{
+    file temp = {0}; // Initialize a temporary file structure
+
+    if (!fileIsDirectory(pFolder)) // If the folder is not a directory, return the empty file
+    {
+        PRINTF("Not a Dir\n");
+        memset(&temp, 0, sizeof(file));
+        return temp;
+    }
+
+    uint8_t sectorIndex = (pFolder->entryIndex / 16) % params.BPB_SecPerClus; // Calculate the sector index
+
+    uint32_t currentCluster = fileStartCluster(pFolder); // Get the current cluster
+
+    uint32_t currentClusterIndex = (pFolder->entryIndex / (16 * params.BPB_SecPerClus)); // Calculate the current cluster index
+
+    // Check if we have reached the end of the FAT
+    for (uint8_t i = 0; i < currentClusterIndex; i++)
+    {
+        currentCluster = fatNextCluster(currentCluster); // Move to the next cluster in the FAT
+        if (currentCluster >= FAT_EOC)                   // If the end of the FAT is reached, return the empty file
+        {
+            pFolder->entryIndex = 2;
+            memset(&temp, 0, sizeof(file));
+            return temp;
+        }
+    }
+
+    if (pFolder->entryIndex <= 2) // If the entry index is less than or equal to 2, reset the sector index and cluster index
+    {
+        sectorIndex = 0;
+        currentCluster = fileStartCluster(pFolder);
+    }
+
+    sd_read_sector(startSectorOfCluster(currentCluster) + sectorIndex, sdBuffer); // Read the sector containing the file entries
+
+    while (1) // Loop until a file is found
+    {
+        temp = *((file *)(sdBuffer + (pFolder->entryIndex % 16) * 32)); // Get the file entry at the current index
+
+        if (!fileIsFreeEntry(&temp)) // If the entry is not a free entry
+        {
+            if (fileIsEndOfDir(&temp)) // If the entry is the end of the directory
+            {
+                memset(&temp, 0, sizeof(file));
+                return temp;
+            }
+
+            if (fileIsLfnEntry(&temp)) // If the entry is a long filename entry
+            {
+
+                uint8_t lfnEntCnt = ((((LFN_entry_t *)&temp)->LDIR_Ord) & 0x0F); // Get the number of long filename entries
+                uint8_t lfnEntCntTemp = lfnEntCnt;
+                uint32_t currentClusterTemp = currentCluster;
+                uint8_t sectorIndexTemp = sectorIndex;
+                uint8_t entryIndexTemp = pFolder->entryIndex;
+
+                while (lfnEntCnt > 0)
+                {
+                    lfnEntCnt--;
+                    pFolder->entryIndex++;
+                    if (pFolder->entryIndex % 16 == 0)
+                    {
+                        sectorIndex++;
+                        if (sectorIndex == params.BPB_SecPerClus)
+                        {
+                            currentCluster = fatNextCluster(currentCluster);
+                            sectorIndex = 0;
+                        }
+                        sd_read_sector(startSectorOfCluster(currentCluster) + sectorIndex, sdBuffer);
+                    }
+                }
+
+                temp = *((file *)(sdBuffer + (pFolder->entryIndex % 16) * 32)); // Get the file entry at the current index
+                temp.fileEntInf.LFN_EntCnt = lfnEntCntTemp;                     // Set the number of long filename entries
+                temp.fileEntInf.lfnEntryCluster = currentClusterTemp;           // Set the cluster index
+                temp.fileEntInf.lfnEntrySectorIndex = sectorIndexTemp;          // Set the sector index
+                temp.fileEntInf.lfnEntryIndex = entryIndexTemp % 16;            // Set the entry index
+            }
+            else
+            {
+
+                temp.fileEntInf.LFN_EntCnt = 0;          // Set the number of long filename entries to 0
+                temp.fileEntInf.lfnEntryCluster = 0;     // Set the cluster index
+                temp.fileEntInf.lfnEntrySectorIndex = 0; // Set the sector index
+                temp.fileEntInf.lfnEntryIndex = 0;       // Set the entry index
+            }
+            temp.fileEntInf.entryIndex = pFolder->entryIndex % 16; // Set the entry index
+            temp.fileEntInf.Cluster = currentCluster;              // Set the cluster index
+            temp.fileEntInf.sectorIndex = sectorIndex;             // Set the sector index
+            pFolder->entryIndex++;                                 // Increment the entry index
+            break;
+        }
+        else
+        {
+            if (!dirNextEntryExists(pFolder, &sectorIndex, &currentCluster))
+            {
+                memset(&temp, 0, sizeof(file));
+                return temp;
+            }
+        }
+    }
+    temp.entryIndex = fileIsDirectory(&temp) ? 2 : 0; // Set the entry index of the file
+
+    return temp;
+}
+
+/**
+ *
+ * @brief Checks if a file exists in the given directory.
+ * @param[in] file The name of the file to search for.
+ * @param[in] pFolder The directory to search in.
+ * @return The file if it exists, otherwise an empty file.
+ */
+file fileExists(file *pFolder, const char *filename)
+{
+    file tempFile = {0};
+
+    do
+    {
+        tempFile = fileGetNext(pFolder);
+        if (fileIsValid(&tempFile))
+        {
+            uint8_t nameIndx;
+            char *tempFileName = fileGetName(&tempFile);
+            // Compare the file name with the given file name
+            for (nameIndx = 0; nameIndx < strlen(filename); nameIndx++)
+            {
+                if (filename[nameIndx] != tempFileName[nameIndx])
+                    break;
+            }
+            // If the file name matches, return the file
+            if (nameIndx == strlen(filename) && nameIndx == strlen(tempFileName))
+            {
+                return tempFile;
+            }
+        }
+    } while (!fileIsEndOfDir(&tempFile));
+    // If the file is not found, return an empty file
+    memset(&tempFile, 0, sizeof(file));
+    return tempFile;
+}
+
+/**
+ * @brief Finds a file in the given path.
+ * @param[in] path The path to find the file in.
+ * @return The file if it exists, otherwise an empty file.
+ */
+static file pathExists(const char *path)
+{
+    file tempFile = getRootDir();
+
+    // If the path is the root directory, return the root directory
+    if (strlen(path) == 1 && path[0] == '/')
+    {
+        return tempFile;
+    }
+
+    // Iterate through the path and find the file
+    uint8_t index = 0;
+    uint8_t charCnt = 0;
+    while (path[charCnt] != '\0')
+    {
+        char dirName[36] = ""; // Store the name of the current directory
+        for (uint8_t i = index + 1; i < index + 36; i++)
+        {
+            charCnt++;
+
+            // If the end of the path is reached or a '/' is encountered, break
+            if (path[i] == '/' || path[i] == '\0')
+            {
+                break;
+            }
+            dirName[charCnt - index - 1] = path[i]; // Store the current directory name
+        }
+        index = charCnt;                           // Move the index to the next directory
+        tempFile = fileExists(&tempFile, dirName); // Check if the file exists
+
+        // If the file is not found, return an empty file
+        if (fileStartCluster(&tempFile) == 0)
+        {
+            return tempFile;
+        }
+    }
+    return tempFile; // Return the file if it is found
 }
 
 /**
@@ -242,373 +661,77 @@ static void displayDate(uint16_t date)
 }
 
 /**
- * @brief Convert a file name from FAT format to a short name (8.3 format)
+ * @brief Display details of a file or directory
+ *
+ * This function prints the name, date, time, and size of a file or directory.
+ * If the file is a directory, a slash '/' is appended to its name.
+ * The output is indented by a specified number of tab spaces.
  *
  * @param[in] pFile Pointer to the file structure
- *
- * @details This function takes a file name in FAT format and converts it to a short
- *          name (8.3 format) by removing any spaces and converting the name to
- *          lowercase. The function also appends a dot (.) to the end of the
- *          name if it is not a directory.
+ * @param[in] tab Number of tab spaces for indentation
  */
-static void fileGetShortName(file *pFile)
+static void displayFile(file *pFile, uint8_t tab)
 {
-    uint8_t nameIndx = 0;
-    for (uint8_t index = 0; index < 8; index++)
-    {
-        // If the character is a space, break out of the loop
-        if (pFile->DIR_Name[index] == ' ')
-            break;
-
-        // If the file name is in long format, convert the name to lowercase
-        if (pFile->DIR_NTRes & 0x08)
-        {
-            if ((pFile->DIR_Name[index] > 64) && (pFile->DIR_Name[index] < 91))
-            {
-                fileName[nameIndx++] = pFile->DIR_Name[index] + 32;
-            }
-            else
-                fileName[nameIndx++] = pFile->DIR_Name[index];
-        }
-
-        // If the file name is not in long format, just copy the character
-        else
-            fileName[nameIndx++] = pFile->DIR_Name[index];
-    }
-
-    // If the file is not a directory, append a dot (.) to the end of the name
-    if ((pFile->DIR_attr & ATTR_DIRECTORY) == 0)
-    {
-        if (pFile->DIR_ext[0] != ' ')
-        {
-            fileName[nameIndx++] = '.';
-            for (uint8_t index = 0; index < 3; index++)
-                fileName[nameIndx++] =
-                    (pFile->DIR_ext[index] == ' ') ? '\0' : pFile->DIR_ext[index] + 32;
-        }
-    }
-}
-
-/**
- * @brief Extracts the file extension from a given file name.
- *
- * @param[in] file_name The file name from which to extract the extension.
- * @return A pointer to a string containing the file extension.
- */
-char *fileGetExtension(char *file_name)
-{
-    static char ext[5] = ""; /**< Buffer to store the file extension. */
-
-    memset(ext, 0, sizeof(ext)); /**< Clear the buffer. */
-
-    uint8_t idx = 0; /**< Index of the current character in the file name. */
-
-    /**
-     * Loop until we reach the dot (.) or the end of the string.
-     */
-    while (file_name[idx] != '.')
-    {
-        idx++;
-        /**
-         * If we have reached the end of the string without finding a dot,
-         * return an empty string.
-         */
-        if (idx == strlen(file_name))
-            return ext;
-    }
-
-    /**
-     * Copy the characters after the dot to the ext buffer.
-     */
-    strcpy(ext, &file_name[idx + 1]);
-
-    return ext;
-}
-
-/**
- * @brief Get the root directory entry
- *
- * @return root directory entry
- */
-static file getRootDir()
-{
-    // Read the first sector of the root directory
-    sd_read_sector(startSecOfClus(params.BPB_RootClus), sdBuffer);
-
-    // Get the root directory entry from the sector
-    file root = *((file *)&sdBuffer[0]);
-
-    // Initialize the root directory's cluster index and entry index
-    root.DIR_FstClusLO = 2;
-    root.entryIndex = 1;
-
-    return root;
-}
-
-/**
- * @brief Get the next file in the folder
- *
- * @param[in] pFolder pointer to the folder
- * @return next file in the folder
- */
-file fileGetNext(file *pFolder)
-{
-    uint8_t sectorIndex = (pFolder->entryIndex / 16) % params.BPB_SecPerClus; // Calculate the sector index
-    uint32_t currentClus = fileStartCluster(pFolder);                         // Get the current cluster index
-    file temp = {0};                                                          // Initialize a temporary file structure
-
-    uint32_t currentClusterIndex = (pFolder->entryIndex / (16 * params.BPB_SecPerClus)); // Calculate the current cluster index
-
-    for (uint8_t i = 0; i < currentClusterIndex; i++)
-    {
-        currentClus = fatNextCluster(currentClus); // Move to the next cluster in the FAT
-        if (currentClus >= FAT_EOC)                // If the end of the FAT is reached, return the empty file
-        {
-            pFolder->entryIndex = 2;
-            memset(&temp, 0, sizeof(file));
-            return temp;
-        }
-    }
-
-    if (pFolder->entryIndex <= 2) // If the entry index is less than or equal to 2, reset the sector index and cluster index
-    {
-        sectorIndex = 0;
-        currentClus = fileStartCluster(pFolder);
-    }
-
-    if (!fileIsDirectory(pFolder)) // If the folder is not a directory, return the empty file
-    {
-        PRINTF("Not a Dir\n");
-        memset(&temp, 0, sizeof(file));
-        return temp;
-    }
-
-    sd_read_sector(startSecOfClus(currentClus) + sectorIndex, sdBuffer); // Read the sector containing the file entries
-
-    while (1) // Loop until a file is found
-    {
-        temp = *((file *)(sdBuffer + (pFolder->entryIndex % 16) * 32)); // Get the file entry at the current index
-
-        if (!fileIsFreeEntry(&temp)) // If the entry is not a free entry
-        {
-            if (fileIsEndOfDir(&temp)) // If the entry is the end of the directory
-            {
-                memset(&temp, 0, sizeof(file));
-                return temp;
-            }
-
-            if (fileIsLfnEntry(&temp)) // If the entry is a long filename entry
-            {
-                memset(fileName, 0, sizeof(fileName));                                   // Clear the file name string
-                uint8_t fileIsLfnEntryCnt = ((((LFN_entry_t *)&temp)->LDIR_Ord) & 0x0F); // Get the number of long filename entries
-                uint8_t lfnEntCntTemp = fileIsLfnEntryCnt;
-                char tempName[fileIsLfnEntryCnt][13]; // Create a temporary array to store the long filename entries
-
-                while (fileIsLfnEntryCnt) // Loop until all long filename entries are processed
-                {
-                    uint8_t tempNameIndex = 0;                                                        // Initialize the temporary name index
-                    LFN_entry_t *entry = (LFN_entry_t *)(sdBuffer + (pFolder->entryIndex % 16) * 32); // Get the long filename entry at the current index
-
-                    for (uint8_t i = 0; i < 10; i += 2) // Copy the characters from the long filename entry to the temporary name array
-                        tempName[fileIsLfnEntryCnt - 1][tempNameIndex++] =
-                            entry->LDIR_Name1[i];
-
-                    for (uint8_t i = 0; i < 12; i += 2)
-                        tempName[fileIsLfnEntryCnt - 1][tempNameIndex++] =
-                            entry->LDIR_Name2[i];
-
-                    for (uint8_t i = 0; i < 4; i += 2)
-                        tempName[fileIsLfnEntryCnt - 1][tempNameIndex++] =
-                            entry->LDIR_Name3[i];
-
-                    fileIsLfnEntryCnt--;   // Decrement the number of long filename entries
-                    pFolder->entryIndex++; // Increment the entry index
-
-                    if ((pFolder->entryIndex % 16) == 0) // If the entry index is a multiple of 16, read the next sector
-                    {
-                        sectorIndex++;
-
-                        if (sectorIndex == params.BPB_SecPerClus) // If the sector index is equal to the number of sectors per cluster
-                        {
-                            sectorIndex = 0;                           // Reset the sector index
-                            currentClus = fatNextCluster(currentClus); // Move to the next cluster in the FAT
-                            if (currentClus >= FAT_EOC)                // If the end of the FAT is reached, return the empty file
-                            {
-                                pFolder->entryIndex = 2;
-                                memset(&temp, 0, sizeof(file));
-                                return temp;
-                            }
-                        }
-                        sd_read_sector(startSecOfClus(currentClus) + sectorIndex,
-                                       sdBuffer);
-                    }
-                }
-
-                char *p_name = (char *)tempName; // Get a pointer to the temporary name array
-
-                // Copy filename to fileName global string buffer.
-                while ((*p_name) != '\0')
-                    fileName[fileNameIndex++] = *(p_name++);
-
-                fileNameIndex = 0;
-
-                temp = *((file *)(sdBuffer + (pFolder->entryIndex % 16) * 32)); // Get the file entry at the current index
-                temp.fileEntInf.Cluster = currentClus;                          // Set the cluster index
-                temp.fileEntInf.sectorIndex = sectorIndex;                      // Set the sector index
-                temp.fileEntInf.entryIndex = pFolder->entryIndex % 16;          // Set the entry index
-                temp.fileEntInf.LFN_EntCnt = lfnEntCntTemp;                     // Set the number of long filename entries
-                pFolder->entryIndex++;
-                break;
-            }
-            else
-            {
-                memset(fileName, 0, sizeof(fileName));                 // Clear the file name string
-                fileGetShortName(&temp);                               // Get the short filename
-                temp.fileEntInf.Cluster = currentClus;                 // Set the cluster index
-                temp.fileEntInf.sectorIndex = sectorIndex;             // Set the sector index
-                temp.fileEntInf.entryIndex = pFolder->entryIndex % 16; // Set the entry index
-                temp.fileEntInf.LFN_EntCnt = 0;                        // Set the number of long filename entries to 0
-                pFolder->entryIndex++;
-                break;
-            }
-        }
-        else
-        {
-            pFolder->entryIndex++;
-            if (pFolder->entryIndex % 16 == 0) // If the entry index is a multiple of 16, read the next sector
-            {
-                sectorIndex++;
-                if (sectorIndex == params.BPB_SecPerClus) // If the sector index is equal to the number of sectors per cluster
-                {
-                    sectorIndex = 0;                           // Reset the sector index
-                    currentClus = fatNextCluster(currentClus); // Move to the next cluster in the FAT
-                    if (currentClus >= FAT_EOC)                // If the end of the FAT is reached, return the empty file
-                    {
-                        pFolder->entryIndex = 2;
-                        memset(&temp, 0, sizeof(file));
-                        return temp;
-                    }
-                }
-                sd_read_sector(startSecOfClus(currentClus) + sectorIndex,
-                               sdBuffer);
-            }
-        }
-    }
-    temp.entryIndex = fileIsDirectory(&temp) ? 2 : 0; // Set the entry index of the file
-
-    return temp;
-}
-
-/**
- *
- * @brief Checks if a file exists in the given directory.
- * @param[in] file The name of the file to search for.
- * @param[in] pFolder The directory to search in.
- * @return The file if it exists, otherwise an empty file.
- */
-file fileExists(file *pFolder, const char *filename)
-{
-    file tempFile = {0};
-
-    do
-    {
-        tempFile = fileGetNext(pFolder);
-        if (fileIsValid(&tempFile))
-        {
-            uint8_t nameIndx;
-            // Compare the file name with the given file name
-            for (nameIndx = 0; nameIndx < strlen(filename); nameIndx++)
-            {
-                if (filename[nameIndx] != fileName[nameIndx])
-                    break;
-            }
-            // If the file name matches, return the file
-            if (nameIndx == strlen(filename) && nameIndx == strlen(fileName))
-                return tempFile;
-        }
-    } while (!fileIsEndOfDir(&tempFile));
-    // If the file is not found, return an empty file
-    memset(&tempFile, 0, sizeof(file));
-    return tempFile;
-}
-
-/**
- * @brief Finds a file in the given path.
- * @param[in] path The path to find the file in.
- * @return The file if it exists, otherwise an empty file.
- */
-static file pathExists(const char *path)
-{
-    file tempFile = getRootDir();
-
-    // If the path is the root directory, return the root directory
-    if (strlen(path) == 1 && path[0] == '/')
-        return tempFile;
-
-    // Iterate through the path and find the file
-    uint8_t index = 0;
-    uint8_t charCnt = 0;
-    while (path[charCnt] != '\0')
-    {
-        char dirName[36] = ""; // Store the name of the current directory
-        for (uint8_t i = index + 1; i < index + 36; i++)
-        {
-            charCnt++;
-
-            // If the end of the path is reached or a '/' is encountered, break
-            if (path[i] == '/' || path[i] == '\0')
-                break;
-            dirName[charCnt - index - 1] = path[i]; // Store the current directory name
-        }
-        index = charCnt;                           // Move the index to the next directory
-        tempFile = fileExists(&tempFile, dirName); // Check if the file exists
-
-        // If the file is not found, return an empty file
-        if (fileStartCluster(&tempFile) == 0)
-            return tempFile;
-    }
-    return tempFile; // Return the file if it is found
-}
-
-static void displayFile(file *pFile, char *fileName, uint8_t tab)
-{
+    // Indent the output by the specified number of tab spaces
     for (uint8_t i = 0; i < tab; i++)
         PRINTF("    ");
 
-    PRINTF("%s", fileName);
+    // Print the file or directory name
+    PRINTF("%s", fileGetName(pFile));
 
+    // Append a slash if the file is a directory
     if (fileIsDirectory(pFile))
         PRINTF("/");
+
     PRINTF("     ");
 
+    // Display the date the file was last written to
     displayDate(pFile->DIR_WrtDate);
 
     PRINTF(" || ");
+
+    // Display the time the file was last written to
     displayTime(pFile->DIR_WrtTime);
 
     PRINTF(" || ");
 
+    // Display the size of the file in bytes
     PRINTF("%d Bytes\n", pFile->DIR_FileSize);
 }
 
-static void printContent(file *pFile)
+/**
+ * @brief Prints the content of a file
+ *
+ * This function reads the content of a file in clusters and prints it to the
+ * console. It stops reading when it reaches the end of the file or a cluster
+ * marked as end of chain (EOC).
+ *
+ * @param[in] pFile Pointer to the file structure
+ */
+static void filePrintContents(file *pFile)
 {
-
     if (fileIsValid(pFile))
     {
         uint32_t charCnt = 0;
         uint32_t Cluster = fileStartCluster(pFile);
 
         PRINTF("\n");
+        // Loop until the end of the file is reached
         do
         {
+            // Loop through each sector in the cluster
             for (uint8_t i = 0; i < params.BPB_SecPerClus; i++)
             {
-                sd_read_sector(startSecOfClus(Cluster) + i, sdBuffer);
+                // Read the sector content
+                sd_read_sector(startSectorOfCluster(Cluster) + i, sdBuffer);
+                // Loop through each byte in the sector
                 for (uint16_t c = 0; c < 512; c++)
                 {
+                    // Print the character
                     PRINTF("%c", sdBuffer[c]);
+                    // Increment character count
                     charCnt++;
+                    // Stop if the character count reaches the file size
                     if (charCnt == fileSize(pFile))
                     {
                         return;
@@ -616,7 +739,9 @@ static void printContent(file *pFile)
                 }
             }
 
-        } while ((Cluster = fatNextCluster(Cluster)) < FAT_EOC);
+            // Move to the next cluster
+            Cluster = fatNextCluster(Cluster);
+        } while (Cluster < FAT_EOC);
     }
 }
 
@@ -631,7 +756,7 @@ bool listDirectory(const char *path)
     if (!fileIsDirectory(&tempFile))
     {
 
-        printContent(&tempFile);
+        filePrintContents(&tempFile);
         PRINTF("\n");
 
         return true;
@@ -643,12 +768,23 @@ bool listDirectory(const char *path)
         tempFile = fileGetNext(&folder);
         if (fileIsValid(&tempFile))
         {
-            displayFile(&tempFile, fileName, 0);
+            displayFile(&tempFile, 0);
         }
     } while (!fileIsEndOfDir(&tempFile));
+
     return true;
 }
 
+/**
+ * @brief Lists the contents of the directory recursively
+ *
+ * This function lists the contents of the given directory recursively. It
+ * handles subdirectories and prints the contents of each subdirectory
+ * indented to show the hierarchy.
+ *
+ * @param[in] pFolder Pointer to the directory to list
+ * @param[in] tab Number of tabs to indent the output
+ */
 void listDirectoryRecursive(file *pFolder, uint8_t tab)
 {
     file tempFile;
@@ -660,14 +796,16 @@ void listDirectoryRecursive(file *pFolder, uint8_t tab)
         {
             if (fileIsDirectory(&tempFile))
             {
+                // Directory, list its contents recursively
                 PRINTF("\n");
-                displayFile(&tempFile, fileName, tab);
+                displayFile(&tempFile, tab);
                 listDirectoryRecursive(&tempFile, tab + 2);
                 PRINTF("\n");
             }
             else
             {
-                displayFile(&tempFile, fileName, tab);
+                // File, print its details
+                displayFile(&tempFile, tab);
             }
         }
     } while (!fileIsEndOfDir(&tempFile));
@@ -715,7 +853,7 @@ uint8_t fileReadByte(file *pFile)
 
     // Read the next sector if needed
     if (pFile->entryIndex % params.BPB_BytesPerSec == 0)
-        sd_read_sector(startSecOfClus(Cluster) + (sectorIndex++), sdBuffer);
+        sd_read_sector(startSectorOfCluster(Cluster) + (sectorIndex++), sdBuffer);
 
     // Return the next byte from the buffer
     return sdBuffer[(pFile->entryIndex++) % params.BPB_BytesPerSec];
@@ -809,7 +947,7 @@ static freeEntInf_t getFreeEntry(file *Dir, uint8_t freeEntryCnt)
         for (freeEntInf.sectorIndex = 0; freeEntInf.sectorIndex < params.BPB_SecPerClus; freeEntInf.sectorIndex++)
         {
             // read the sector and iterate through each entry
-            sd_read_sector(startSecOfClus(freeEntInf.Cluster) + freeEntInf.sectorIndex, sdBuffer);
+            sd_read_sector(startSectorOfCluster(freeEntInf.Cluster) + freeEntInf.sectorIndex, sdBuffer);
             for (freeEntInf.entryIndex = 0; freeEntInf.entryIndex < 16; freeEntInf.entryIndex++)
             {
                 file temp = *((file *)(sdBuffer + freeEntInf.entryIndex * 32));
@@ -822,14 +960,14 @@ static freeEntInf_t getFreeEntry(file *Dir, uint8_t freeEntryCnt)
                         if ((freeEntInf.entryIndex + freeEntryCnt) > 15)
                         {
                             // read the sector and fill the remaining entries with 0xE5
-                            sd_read_sector(startSecOfClus(freeEntInf.Cluster) + freeEntInf.sectorIndex, sdBuffer);
+                            sd_read_sector(startSectorOfCluster(freeEntInf.Cluster) + freeEntInf.sectorIndex, sdBuffer);
                             for (uint8_t i = freeEntInf.entryIndex; i < 16; i++)
                             {
                                 file *pFile = (file *)(sdBuffer + (i * 32));
                                 pFile->DIR_Name[0] = 0xE5;
                             }
                             // write the sector back
-                            sd_write_sector(startSecOfClus(freeEntInf.Cluster) + freeEntInf.sectorIndex, sdBuffer);
+                            sd_write_sector(startSectorOfCluster(freeEntInf.Cluster) + freeEntInf.sectorIndex, sdBuffer);
 
                             // increment the sector index
                             freeEntInf.sectorIndex++;
@@ -852,14 +990,20 @@ static freeEntInf_t getFreeEntry(file *Dir, uint8_t freeEntryCnt)
                     {
                         freeEntInf.entryIndex += i;
                         if (freeEntInf.entryIndex == 16)
+                        {
                             break;
+                        }
 
                         temp = *((file *)(sdBuffer + freeEntInf.entryIndex * 32));
                         if (!fileIsFreeEntry(&temp))
+                        {
                             break;
+                        }
                     }
                     if (i != freeEntryCnt)
+                    {
                         continue;
+                    }
 
                     freeEntInf.entryIndex -= (freeEntryCnt - 1);
                     // return the freeEntInf structure
@@ -890,7 +1034,7 @@ static freeEntInf_t getFreeEntry(file *Dir, uint8_t freeEntryCnt)
  * @param minute Pointer to store the minute (0-59)
  * @param second Pointer to store the second (0-59)
  */
-static void get_datetime_numerical(uint16_t *year, uint8_t *month, uint8_t *day, uint8_t *hour, uint8_t *minute, uint8_t *second)
+static void getDateTimeNumerical(uint16_t *year, uint8_t *month, uint8_t *day, uint8_t *hour, uint8_t *minute, uint8_t *second)
 {
     const char *date_str = __DATE__; // e.g. "Apr 12 2023"
     const char *time_str = __TIME__; // e.g. "23:59:59"
@@ -1133,7 +1277,7 @@ static uint32_t getNextFreeCluster()
  * @param[in] isDir Boolean indicating if the entry is a directory
  * @return The created file structure
  */
-static file createFile(file *pathDir, const char *filename, bool isDir)
+static file fileCreate(file *pathDir, const char *filename, bool isDir)
 {
     file newFile = {0};
 
@@ -1147,6 +1291,7 @@ static file createFile(file *pathDir, const char *filename, bool isDir)
     memset(newFile.DIR_ext, ' ', 3);
 
     freeEntInf_t freeEntInf;
+    uint8_t lfnEntCnt;
 
     // Check if filename requires long file name (LFN) entries
     if (mixedLetters(filename) || (fileNameLength(filename) > 8))
@@ -1162,9 +1307,13 @@ static file createFile(file *pathDir, const char *filename, bool isDir)
             {
                 // Convert lower case to upper case
                 if ((filename[i] > 96) && (filename[i] < 123))
+                {
                     newFile.DIR_Name[i] = filename[i] - 32;
+                }
                 else
+                {
                     newFile.DIR_Name[i] = filename[i];
+                }
             }
             if (fileNameLength(filename) > 8)
             {
@@ -1178,18 +1327,26 @@ static file createFile(file *pathDir, const char *filename, bool isDir)
                 break;
             newFile.DIR_ext[i] = filename[tempIndx + i] - 32;
         }
-        uint8_t lfnEntCnt = strlen(filename) / 13;
-        newFile.fileEntInf.LFN_EntCnt = lfnEntCnt;
+        lfnEntCnt = strlen(filename) / 13;
 
         if ((strlen(filename) % 13) != 0)
+        {
             lfnEntCnt += 1;
+        }
 
         uint8_t nameIndex = 0;
-        uint8_t temp = lfnEntCnt;
+        uint8_t lfnEntCntTemp = lfnEntCnt;
 
         // Get free entry for LFN and file entry
         freeEntInf = getFreeEntry(pathDir, lfnEntCnt + 1);
-        sd_read_sector(startSecOfClus(freeEntInf.Cluster) + freeEntInf.sectorIndex, sdBuffer);
+
+        // Set LFN entry information
+        newFile.fileEntInf.LFN_EntCnt = lfnEntCnt;
+        newFile.fileEntInf.lfnEntryCluster = freeEntInf.Cluster;
+        newFile.fileEntInf.lfnEntrySectorIndex = freeEntInf.sectorIndex;
+        newFile.fileEntInf.lfnEntryIndex = freeEntInf.entryIndex;
+
+        sd_read_sector(startSectorOfCluster(freeEntInf.Cluster) + freeEntInf.sectorIndex, sdBuffer);
 
         // Write LFN entries
         while (lfnEntCnt)
@@ -1198,14 +1355,16 @@ static file createFile(file *pathDir, const char *filename, bool isDir)
             entry->LDIR_Attr = ATTR_LONG_FILE_NAME;
             entry->LDIR_FstClusLO = 0;
             entry->LDIR_Type = 0;
-            entry->LDIR_Ord = temp - lfnEntCnt + 1;
+            entry->LDIR_Ord = lfnEntCntTemp - lfnEntCnt + 1;
             entry->LDIR_Chksum = getChecksum(&newFile);
             memset(entry->LDIR_Name1, 0, 10);
             memset(entry->LDIR_Name2, 0, 12);
             memset(entry->LDIR_Name3, 0, 4);
 
             if (lfnEntCnt == 1)
+            {
                 entry->LDIR_Ord |= 0x40;
+            }
 
             for (uint8_t i = 0; i < 10; i += 2)
             {
@@ -1225,13 +1384,13 @@ static file createFile(file *pathDir, const char *filename, bool isDir)
 
             lfnEntCnt--;
         }
-        freeEntInf.entryIndex += temp;
+        freeEntInf.entryIndex += lfnEntCntTemp;
     }
     else
     {
         // Get free entry for file entry
         freeEntInf = getFreeEntry(pathDir, 1);
-        sd_read_sector(startSecOfClus(freeEntInf.Cluster) + freeEntInf.sectorIndex, sdBuffer);
+        sd_read_sector(startSectorOfCluster(freeEntInf.Cluster) + freeEntInf.sectorIndex, sdBuffer);
 
         // Set file name and extension
         for (uint8_t i = 0; i < 9; i++)
@@ -1255,6 +1414,9 @@ static file createFile(file *pathDir, const char *filename, bool isDir)
             newFile.DIR_ext[i] = filename[tempIndx + i] - 32;
         }
         newFile.fileEntInf.LFN_EntCnt = 0;
+        newFile.fileEntInf.lfnEntryCluster = 0;
+        newFile.fileEntInf.lfnEntrySectorIndex = 0;
+        newFile.fileEntInf.lfnEntryIndex = 0;
     }
 
     // Set attributes for directory or file
@@ -1266,7 +1428,7 @@ static file createFile(file *pathDir, const char *filename, bool isDir)
     // Set creation date and time
     uint16_t year = 0;
     uint8_t month = 0, day = 0, hour = 0, minute = 0, second = 0;
-    get_datetime_numerical(&year, &month, &day, &hour, &minute, &second);
+    getDateTimeNumerical(&year, &month, &day, &hour, &minute, &second);
     fileSetDate(&newFile, year, month, day);
     fileSetTime(&newFile, hour, minute, second);
 
@@ -1280,7 +1442,7 @@ static file createFile(file *pathDir, const char *filename, bool isDir)
     memcpy(pFile, &newFile, 32);
 
     // Check if the file was created successfully
-    if (sd_write_sector(startSecOfClus(freeEntInf.Cluster) + freeEntInf.sectorIndex, sdBuffer) == SD_WRITE_SUCCESS)
+    if (sd_write_sector(startSectorOfCluster(freeEntInf.Cluster) + freeEntInf.sectorIndex, sdBuffer) == SD_WRITE_SUCCESS)
     {
         PRINTF("File Created!\n");
         return newFile;
@@ -1331,7 +1493,7 @@ file fileOpen(const char *path, const char *filename)
         }
 
         // If the file does not exist, create a new file
-        return createFile(&pathDir, filename, false);
+        return fileCreate(&pathDir, filename, false);
     }
 }
 
@@ -1368,7 +1530,7 @@ file createDirectory(const char *path, const char *dirName)
     }
 
     // Create the new directory
-    thisDir = createFile(&parentDir, dirName, true);
+    thisDir = fileCreate(&parentDir, dirName, true);
 
     // Get the start cluster of the new directory
     uint32_t dirStartClus = fileStartCluster(&thisDir);
@@ -1391,14 +1553,14 @@ file createDirectory(const char *path, const char *dirName)
 
     // Write empty sectors for the new directory
     for (uint8_t sectorIndex = 0; sectorIndex < params.BPB_SecPerClus; sectorIndex++)
-        sd_write_sector(startSecOfClus(dirStartClus) + sectorIndex, sdBuffer);
+        sd_write_sector(startSectorOfCluster(dirStartClus) + sectorIndex, sdBuffer);
 
     // Write current and parent directory entries to the first sector
     memcpy(sdBuffer, &thisDir, 32);
     memcpy(sdBuffer + 32, &parentDir, 32);
 
     // Write the directory entries to the SD card
-    sd_write_sector(startSecOfClus(dirStartClus), sdBuffer);
+    sd_write_sector(startSectorOfCluster(dirStartClus), sdBuffer);
 
     return thisDir;
 }
@@ -1415,7 +1577,7 @@ file createDirectory(const char *path, const char *dirName)
  */
 bool fileWrite(file *pFile, const char *data)
 {
-    uint32_t startClus = fileStartCluster(pFile);                        // Get the starting cluster
+    uint32_t currentCluster = fileStartCluster(pFile);                   // Get the starting cluster
     uint16_t byteIndex = pFile->DIR_FileSize % params.BPB_BytesPerSec;   // Calculate byte offset in sector
     uint32_t sectorIndex = pFile->DIR_FileSize / params.BPB_BytesPerSec; // Calculate sector index
     uint32_t clusterCnt = (sectorIndex / params.BPB_SecPerClus) + 1;     // Calculate number of clusters
@@ -1423,25 +1585,25 @@ bool fileWrite(file *pFile, const char *data)
     bool moreData = true;
 
     sectorIndex = sectorIndex % params.BPB_SecPerClus; // Normalize sector index within cluster
-    uint32_t tempClus;
+    uint32_t tempCluster;
 
     // Handle cluster allocation if necessary
     if (clusterCnt > 1)
     {
         while (clusterCnt)
         {
-            tempClus = startClus;
-            startClus = fatNextCluster(startClus); // Move to next cluster
+            tempCluster = currentCluster;
+            currentCluster = fatNextCluster(currentCluster); // Move to next cluster
             clusterCnt--;
         }
         uint32_t nextClus = getNextFreeCluster(); // Allocate new cluster
-        fatSetNextClus(tempClus, nextClus);       // Link current cluster to new cluster
+        fatSetNextClus(tempCluster, nextClus);    // Link current cluster to new cluster
         fatSetNextClus(nextClus, FAT_EOC);        // Mark new cluster as end of chain
     }
 
     // Read the current sector if not starting at the beginning
     if (byteIndex != 0)
-        sd_read_sector(startSecOfClus(startClus) + sectorIndex, sdBuffer);
+        sd_read_sector(startSectorOfCluster(currentCluster) + sectorIndex, sdBuffer);
 
     // Write data to sectors
     for (uint32_t sector = sectorIndex; sector < params.BPB_SecPerClus; sector++)
@@ -1457,7 +1619,7 @@ bool fileWrite(file *pFile, const char *data)
         }
         byteIndex = 0;
 
-        if (sd_write_sector(startSecOfClus(startClus) + sector, sdBuffer) == SD_WRITE_ERROR)
+        if (sd_write_sector(startSectorOfCluster(currentCluster) + sector, sdBuffer) == SD_WRITE_ERROR)
             return false;
 
         // Update file size and metadata if all data has been written
@@ -1465,11 +1627,11 @@ bool fileWrite(file *pFile, const char *data)
         {
             pFile->DIR_FileSize += strlen(data);
 
-            if (sd_read_sector(startSecOfClus(pFile->fileEntInf.Cluster) + pFile->fileEntInf.sectorIndex, sdBuffer) == SD_READ_SUCCESS)
+            if (sd_read_sector(startSectorOfCluster(pFile->fileEntInf.Cluster) + pFile->fileEntInf.sectorIndex, sdBuffer) == SD_READ_SUCCESS)
             {
                 file *p_temp = (file *)(sdBuffer + pFile->fileEntInf.entryIndex * 32);
                 memcpy(p_temp, pFile, 32);
-                if (sd_write_sector(startSecOfClus(pFile->fileEntInf.Cluster) + pFile->fileEntInf.sectorIndex, sdBuffer) == SD_WRITE_SUCCESS)
+                if (sd_write_sector(startSectorOfCluster(pFile->fileEntInf.Cluster) + pFile->fileEntInf.sectorIndex, sdBuffer) == SD_WRITE_SUCCESS)
                     return true;
             }
             return false;
@@ -1519,7 +1681,7 @@ bool fileDelete(const char *path, const char *filename)
     }
 
     // Read the sector containing the file entry
-    if (sd_read_sector(startSecOfClus(tempFile.fileEntInf.Cluster) + tempFile.fileEntInf.sectorIndex, sdBuffer) == SD_READ_SUCCESS)
+    if (sd_read_sector(startSectorOfCluster(tempFile.fileEntInf.Cluster) + tempFile.fileEntInf.sectorIndex, sdBuffer) == SD_READ_SUCCESS)
     {
         // Mark LFN and directory entries as deleted
         for (uint8_t i = 0; i < (lfnEntCnt + 1); i++)
@@ -1529,16 +1691,16 @@ bool fileDelete(const char *path, const char *filename)
         }
 
         // Write back the modified sector
-        if (sd_write_sector(startSecOfClus(tempFile.fileEntInf.Cluster) + tempFile.fileEntInf.sectorIndex, sdBuffer) == SD_WRITE_SUCCESS)
+        if (sd_write_sector(startSectorOfCluster(tempFile.fileEntInf.Cluster) + tempFile.fileEntInf.sectorIndex, sdBuffer) == SD_WRITE_SUCCESS)
         {
             // Clear the file's clusters in the FAT table
-            uint32_t fileClus = fileStartCluster(&tempFile);
-            uint32_t tempClus;
-            while (fileClus < FAT_EOC)
+            uint32_t currentCluster = fileStartCluster(&tempFile);
+            uint32_t tempCluster;
+            while (currentCluster < FAT_EOC)
             {
-                tempClus = fileClus;
-                fileClus = fatNextCluster(fileClus);
-                fatSetNextClus(tempClus, 0x00000000);
+                tempCluster = currentCluster;
+                currentCluster = fatNextCluster(currentCluster);
+                fatSetNextClus(tempCluster, 0x00000000);
             }
             return true;
         }
