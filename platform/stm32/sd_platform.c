@@ -39,6 +39,10 @@ static void Error_Handler(void)
     /* USER CODE END Error_Handler_Debug */
 }
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> a10afa5 (Update fat32)
 void sd_spi_init(void)
 {
     GPIO_InitTypeDef GPIO_InitStruct = {0};

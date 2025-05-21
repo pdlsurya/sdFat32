@@ -31,9 +31,9 @@
 
 void sd_spi_init(void);
 
-void sd_cs_enable(void);
+void sd_cs_select(void);
 
-void sd_cs_disable(void);
+void sd_cs_deselect(void);
 
 void sd_delay_ms(uint32_t ms);
 

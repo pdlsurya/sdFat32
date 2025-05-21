@@ -221,19 +221,6 @@ static inline uint32_t fileStartCluster(file *pFile)
 }
 
 /**
- * @brief Check if a file is at the end of a directory
- * @param pFile Pointer to file structure
- * @return true if the file is at the end of a directory, false otherwise
- *
- * This function checks the first character of the file name to determine if the
- * file is at the end of a directory by verifying that the first character is 0.
- */
-static inline bool fileIsEndOfDir(file *pFile)
-{
-    return ((uint8_t)(pFile->DIR_Name[0]) == 0);
-}
-
-/**
  * @brief Check if the given file is valid
  * @param pFile Pointer to file structure
  * @return true if the file is valid, false otherwise
@@ -245,7 +232,7 @@ static inline bool fileIsEndOfDir(file *pFile)
 bool fileIsValid(file *pFile)
 {
     const char *name = fileGetName(pFile);
-    return ((fileStartCluster(pFile) != 0) && !(fileIsEndOfDir(pFile) || (name[0] == '.' && name[1] == '_')));
+    return ((fileStartCluster(pFile) != 0) && !(fileIsEndOfDirectory(pFile) || (name[0] == '.' && name[1] == '_')));
 }
 
 /**
@@ -514,7 +501,7 @@ file fileGetNext(file *pDir)
 
         if (!fileIsFreeEntry(&temp)) // If the entry is not a free entry
         {
-            if (fileIsEndOfDir(&temp)) // If the entry is the end of the directory
+            if (fileIsEndOfDirectory(&temp)) // If the entry is the end of the directory
             {
                 memset(&temp, 0, sizeof(file));
                 return temp;
@@ -602,7 +589,7 @@ static file fileExists(file *pDir, const char *filename)
                 return tempFile;
             }
         }
-    } while (!fileIsEndOfDir(&tempFile));
+    } while (!fileIsEndOfDirectory(&tempFile));
     // If the file is not found, return an empty file
     memset(&tempFile, 0, sizeof(file));
     return tempFile;
@@ -813,7 +800,7 @@ bool listDirectory(const char *path)
         {
             displayFile(&tempFile, 0);
         }
-    } while (!fileIsEndOfDir(&tempFile));
+    } while (!fileIsEndOfDirectory(&tempFile));
 
     return true;
 }
@@ -851,7 +838,7 @@ void listDirectoryRecursive(file *pDir, uint8_t tab)
                 displayFile(&tempFile, tab);
             }
         }
-    } while (!fileIsEndOfDir(&tempFile));
+    } while (!fileIsEndOfDirectory(&tempFile));
 }
 
 /**
@@ -994,10 +981,10 @@ static freeEntInf_t getFreeEntry(file *Dir, uint8_t freeEntryCnt)
             for (freeEntInf.entryIndex = 0; freeEntInf.entryIndex < 16; freeEntInf.entryIndex++)
             {
                 file temp = *((file *)(sdBuffer + freeEntInf.entryIndex * 32));
-                if (fileIsFreeEntry(&temp) || fileIsEndOfDir(&temp))
+                if (fileIsFreeEntry(&temp) || fileIsEndOfDirectory(&temp))
                 {
                     // if the entry is free, return the freeEntInf structure
-                    if (fileIsEndOfDir(&temp))
+                    if (fileIsEndOfDirectory(&temp))
                     {
                         // if the end of the directory is reached, return the structure
                         if ((freeEntInf.entryIndex + freeEntryCnt) > 15)

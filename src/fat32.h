@@ -156,6 +156,19 @@ extern "C"
     void listDirectoryRecursive(file *pFolder, uint8_t tab);
 
     /**
+     * @brief Check if a file represents the end of a directory
+     * @param pFile Pointer to file structure
+     * @return true if the file represents the end of a directory, false otherwise
+     *
+     * This function checks the first character of the file name to determine if the
+     * file represents the end of a directory by verifying that the first character is 0.
+     */
+    static inline bool fileIsEndOfDirectory(file *pFile)
+    {
+        return ((uint8_t)(pFile->DIR_Name[0]) == 0);
+    }
+
+    /**
      * @brief Check if the given file is a directory
      *
      * This function checks the file attributes to determine if the
