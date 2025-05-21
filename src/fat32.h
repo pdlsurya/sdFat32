@@ -138,7 +138,7 @@ extern "C"
 
     bool fileDelete(const char *path, const char *filename);
 
-    file fileGetNext(file *pFile);
+    file fileGetNext(file *pFolder);
 
     char *fileGetName(file *pFile);
 
