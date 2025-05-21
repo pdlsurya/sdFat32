@@ -861,7 +861,7 @@ void listDirectoryRecursive(file *pDir, uint8_t tab)
  * transitions as the file is read sequentially.
  *
  * @param[in] pFile Pointer to the file structure
- * @return The byte read from the file, or 0 if the file is closed or end of file is reached
+ * @return The byte read from the file, or 0 if the file is closed, file is not open for reading or end of file is reached
  */
 uint8_t fileReadByte(file *pFile)
 {
@@ -1498,32 +1498,33 @@ static file fileCreate(file *pathDir, const char *filename, bool isDir)
 }
 
 /**
+ * @brief Opens a file at the specified path with the given access mode.
  *
- * @brief Opens a file in the given path
+ * This function checks if the provided path is a valid directory and then attempts
+ * to open a file with the specified filename and access mode. If the file doesn't
+ * exist and the access mode permits writing, a new file is created.
  *
- * This function opens a file in the given path. If the file does not exist, it
- * creates a new file. If the file already exists, it returns the existing file.
- *
- * @param[in] path The path to open the file in
- * @param[in] filename The name of the file to open
- * @return The file structure if the file was opened successfully, otherwise an
- *         empty file structure
+ * @param[in] path The path to the directory containing the file.
+ * @param[in] filename The name of the file to open.
+ * @param[in] accessMode The mode in which to open the file (e.g., read, write).
+ * @return The file structure representing the opened or newly created file, or an
+ *         invalid file structure if the path does not exist or file creation fails.
  */
 file fileOpen(const char *path, const char *filename, uint8_t accessMode)
 {
+    // Check if the specified path exists and is a directory
     file pathDir = pathExists(path);
-
     if ((fileStartCluster(&pathDir) == 0) || !fileIsDirectory(&pathDir))
     {
         PRINTF("Path does not exist!\n");
-        return pathDir;
+        return pathDir; // Return the directory file if path is invalid
     }
     else
     {
         // Check if the file already exists in the directory
         file tempFile = fileExists(&pathDir, filename);
 
-        // If the file doesn't exist, create a new file
+        // If the file doesn't exist and writing is allowed, create a new file
         if (!fileIsValid(&tempFile))
         {
             if (accessMode & FILE_MODE_WRITE)
@@ -1539,10 +1540,10 @@ file fileOpen(const char *path, const char *filename, uint8_t accessMode)
         else
         {
             PRINTF("File exists!\n");
-            tempFile.accessMode = accessMode;
+            tempFile.accessMode = accessMode; // Set the access mode for the existing file
         }
 
-        return tempFile;
+        return tempFile; // Return the file structure
     }
 }
 
@@ -1646,7 +1647,7 @@ file createDirectory(const char *path, const char *name)
  *
  * @param[in] pFile Pointer to the file structure to write to
  * @param[in] data Pointer to the data to be written
- * @return true if the write operation is successful, false otherwise
+ * @return true if the write operation is successful, false if file is not open for writing or an error occurs
  */
 bool fileWrite(file *pFile, const char *data)
 {
