@@ -49,6 +49,10 @@ extern "C"
 
 #define FAT_EOC 0x0FFFFFF8
 
+// File access mode
+#define FILE_MODE_WRITE 0x1
+#define FILE_MODE_READ 0x2
+
     typedef struct
     {
         uint32_t Cluster;
@@ -124,13 +128,12 @@ extern "C"
         uint32_t DIR_FileSize;
         uint32_t entryIndex; ///< For directory, it indicates index of file entry. For file, it indicates index of  file contents in bytes
         fileEntInf_t fileEntInf;
+        uint8_t accessMode;
     } file;
 
     bool fat32Init();
 
-    file fileExists(file *pFolder, const char *filename);
-
-    file fileOpen(const char *path, const char *filename);
+    file fileOpen(const char *path, const char *filename, uint8_t accessMode);
 
     uint8_t fileReadByte(file *pFile);
 
@@ -142,38 +145,15 @@ extern "C"
 
     char *fileGetName(file *pFile);
 
+    bool fileIsValid(file *pFile);
+
     file createDirectory(const char *path, const char *dirName);
+
+    file openDirectory(const char *path);
 
     bool listDirectory(const char *path);
 
     void listDirectoryRecursive(file *pFolder, uint8_t tab);
-
-    /**
-     * @brief Get the Long File Name (LFN) entry count for a file
-     * @param pFile Pointer to file structure
-     * @return LFN entry count
-     *
-     * This function returns the LFN entry count for a file by accessing the
-     * LFN_EntCnt member of the file structure.
-     */
-    static inline uint8_t fileLfnEntryCnt(file *pFile)
-    {
-        return pFile->fileEntInf.LFN_EntCnt;
-    }
-
-    /**
-     * @brief Get the start cluster of a file
-     * @param pFile Pointer to file structure
-     * @return Start cluster of the file
-     */
-    static inline uint32_t fileStartCluster(file *pFile)
-    {
-        uint32_t startClus = (uint32_t)pFile->DIR_FstClusLO;
-
-        startClus |= ((uint32_t)(pFile->DIR_FstClusHI)) << 16;
-
-        return startClus;
-    }
 
     /**
      * @brief Check if the given file is a directory
@@ -188,34 +168,6 @@ extern "C"
     {
         // Check if the file attribute indicates a directory
         return !(((pFile->DIR_attr & (ATTR_DIRECTORY | ATTR_VOLUME_ID)) == 0));
-    }
-
-    /**
-     * @brief Check if a file is at the end of a directory
-     * @param pFile Pointer to file structure
-     * @return true if the file is at the end of a directory, false otherwise
-     *
-     * This function checks the first character of the file name to determine if the
-     * file is at the end of a directory by verifying that the first character is 0.
-     */
-    static inline bool fileIsEndOfDir(file *pFile)
-    {
-        return ((uint8_t)(pFile->DIR_Name[0]) == 0);
-    }
-
-    /**
-     * @brief Check if the given file is valid
-     * @param pFile Pointer to file structure
-     * @return true if the file is valid, false otherwise
-     *
-     * This function checks if the file is valid by verifying that the start
-     * cluster is not zero and the file is not end of directory and file name doesnot start with  '.' and '_'.
-     *
-     */
-    static inline bool fileIsValid(file *pFile)
-    {
-        const char *name = fileGetName(pFile);
-        return ((fileStartCluster(pFile) != 0) && !(fileIsEndOfDir(pFile) || (name[0] == '.' && name[1] == '_')));
     }
 
     /**

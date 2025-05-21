@@ -194,6 +194,61 @@ static inline bool fileIsFreeEntry(file *pFile)
 }
 
 /**
+ * @brief Get the Long File Name (LFN) entry count for a file
+ * @param pFile Pointer to file structure
+ * @return LFN entry count
+ *
+ * This function returns the LFN entry count for a file by accessing the
+ * LFN_EntCnt member of the file structure.
+ */
+static inline uint8_t fileLfnEntryCnt(file *pFile)
+{
+    return pFile->fileEntInf.LFN_EntCnt;
+}
+
+/**
+ * @brief Get the start cluster of a file
+ * @param pFile Pointer to file structure
+ * @return Start cluster of the file
+ */
+static inline uint32_t fileStartCluster(file *pFile)
+{
+    uint32_t startClus = (uint32_t)pFile->DIR_FstClusLO;
+
+    startClus |= ((uint32_t)(pFile->DIR_FstClusHI)) << 16;
+
+    return startClus;
+}
+
+/**
+ * @brief Check if a file is at the end of a directory
+ * @param pFile Pointer to file structure
+ * @return true if the file is at the end of a directory, false otherwise
+ *
+ * This function checks the first character of the file name to determine if the
+ * file is at the end of a directory by verifying that the first character is 0.
+ */
+static inline bool fileIsEndOfDir(file *pFile)
+{
+    return ((uint8_t)(pFile->DIR_Name[0]) == 0);
+}
+
+/**
+ * @brief Check if the given file is valid
+ * @param pFile Pointer to file structure
+ * @return true if the file is valid, false otherwise
+ *
+ * This function checks if the file is valid by verifying that the start
+ * cluster is not zero and the file is not end of directory and file name doesnot start with  '.' and '_'.
+ *
+ */
+bool fileIsValid(file *pFile)
+{
+    const char *name = fileGetName(pFile);
+    return ((fileStartCluster(pFile) != 0) && !(fileIsEndOfDir(pFile) || (name[0] == '.' && name[1] == '_')));
+}
+
+/**
  * @brief Check if a file is closed
  *
  * This function checks if a file is closed by verifying that the start cluster
@@ -217,16 +272,16 @@ static inline bool fileIsClosed(file *pFile)
  * entry exists, it increments the entry index and returns true. Otherwise, it
  * returns false.
  *
- * @param[in,out] pFolder pointer to the folder
+ * @param[in,out] pDir pointer to the folder
  * @param[in,out] sectorIndex sector index of the next entry
  * @param[in,out] currentCluster current cluster index
  * @return true if the next entry exists, false otherwise
  */
-static bool dirNextEntryExists(file *pFolder, uint8_t *sectorIndex, uint32_t *currentCluster)
+static bool dirNextEntryExists(file *pDir, uint8_t *sectorIndex, uint32_t *currentCluster)
 {
-    pFolder->entryIndex++; // Increment the entry index
+    pDir->entryIndex++; // Increment the entry index
 
-    if ((pFolder->entryIndex % 16) == 0) // If reached the end of the sector, read the next sector
+    if ((pDir->entryIndex % 16) == 0) // If reached the end of the sector, read the next sector
     {
         // Increment the sector index
         (*sectorIndex)++;
@@ -239,7 +294,7 @@ static bool dirNextEntryExists(file *pFolder, uint8_t *sectorIndex, uint32_t *cu
             *currentCluster = fatNextCluster(*currentCluster);
             if (*currentCluster >= FAT_EOC) // If the end of the FAT is reached, return false
             {
-                pFolder->entryIndex = 2;
+                pDir->entryIndex = 2;
                 return false;
             }
         }
@@ -413,25 +468,25 @@ static file getRootDir()
 /**
  * @brief Get the next file in the folder
  *
- * @param[in] pFolder pointer to the folder
+ * @param[in] pDir pointer to the folder
  * @return next file in the folder
  */
-file fileGetNext(file *pFolder)
+file fileGetNext(file *pDir)
 {
     file temp = {0}; // Initialize a temporary file structure
 
-    if (!fileIsDirectory(pFolder)) // If the folder is not a directory, return the empty file
+    if (!fileIsDirectory(pDir)) // If the folder is not a directory, return the empty file
     {
         PRINTF("Not a Dir\n");
         memset(&temp, 0, sizeof(file));
         return temp;
     }
 
-    uint8_t sectorIndex = (pFolder->entryIndex / 16) % params.BPB_SecPerClus; // Calculate the sector index
+    uint8_t sectorIndex = (pDir->entryIndex / 16) % params.BPB_SecPerClus; // Calculate the sector index
 
-    uint32_t currentCluster = fileStartCluster(pFolder); // Get the current cluster
+    uint32_t currentCluster = fileStartCluster(pDir); // Get the current cluster
 
-    uint32_t currentClusterIndex = (pFolder->entryIndex / (16 * params.BPB_SecPerClus)); // Calculate the current cluster index
+    uint32_t currentClusterIndex = (pDir->entryIndex / (16 * params.BPB_SecPerClus)); // Calculate the current cluster index
 
     // Check if we have reached the end of the FAT
     for (uint8_t i = 0; i < currentClusterIndex; i++)
@@ -439,23 +494,23 @@ file fileGetNext(file *pFolder)
         currentCluster = fatNextCluster(currentCluster); // Move to the next cluster in the FAT
         if (currentCluster >= FAT_EOC)                   // If the end of the FAT is reached, return the empty file
         {
-            pFolder->entryIndex = 2;
+            pDir->entryIndex = 2;
             memset(&temp, 0, sizeof(file));
             return temp;
         }
     }
 
-    if (pFolder->entryIndex <= 2) // If the entry index is less than or equal to 2, reset the sector index and cluster index
+    if (pDir->entryIndex <= 2) // If the entry index is less than or equal to 2, reset the sector index and cluster index
     {
         sectorIndex = 0;
-        currentCluster = fileStartCluster(pFolder);
+        currentCluster = fileStartCluster(pDir);
     }
 
     sd_read_sector(startSectorOfCluster(currentCluster) + sectorIndex, sdBuffer); // Read the sector containing the file entries
 
     while (1) // Loop until a file is found
     {
-        temp = *((file *)(sdBuffer + (pFolder->entryIndex % 16) * 32)); // Get the file entry at the current index
+        temp = *((file *)(sdBuffer + (pDir->entryIndex % 16) * 32)); // Get the file entry at the current index
 
         if (!fileIsFreeEntry(&temp)) // If the entry is not a free entry
         {
@@ -472,13 +527,13 @@ file fileGetNext(file *pFolder)
                 uint8_t lfnEntCntTemp = lfnEntCnt;
                 uint32_t currentClusterTemp = currentCluster;
                 uint8_t sectorIndexTemp = sectorIndex;
-                uint8_t entryIndexTemp = pFolder->entryIndex;
+                uint8_t entryIndexTemp = pDir->entryIndex;
 
                 while (lfnEntCnt > 0)
                 {
                     lfnEntCnt--;
-                    pFolder->entryIndex++;
-                    if (pFolder->entryIndex % 16 == 0)
+                    pDir->entryIndex++;
+                    if (pDir->entryIndex % 16 == 0)
                     {
                         sectorIndex++;
                         if (sectorIndex == params.BPB_SecPerClus)
@@ -490,11 +545,11 @@ file fileGetNext(file *pFolder)
                     }
                 }
 
-                temp = *((file *)(sdBuffer + (pFolder->entryIndex % 16) * 32)); // Get the file entry at the current index
-                temp.fileEntInf.LFN_EntCnt = lfnEntCntTemp;                     // Set the number of long filename entries
-                temp.fileEntInf.lfnEntryCluster = currentClusterTemp;           // Set the cluster index
-                temp.fileEntInf.lfnEntrySectorIndex = sectorIndexTemp;          // Set the sector index
-                temp.fileEntInf.lfnEntryIndex = entryIndexTemp % 16;            // Set the entry index
+                temp = *((file *)(sdBuffer + (pDir->entryIndex % 16) * 32)); // Get the file entry at the current index
+                temp.fileEntInf.LFN_EntCnt = lfnEntCntTemp;                  // Set the number of long filename entries
+                temp.fileEntInf.lfnEntryCluster = currentClusterTemp;        // Set the cluster index
+                temp.fileEntInf.lfnEntrySectorIndex = sectorIndexTemp;       // Set the sector index
+                temp.fileEntInf.lfnEntryIndex = entryIndexTemp % 16;         // Set the entry index
             }
             else
             {
@@ -504,15 +559,15 @@ file fileGetNext(file *pFolder)
                 temp.fileEntInf.lfnEntrySectorIndex = 0; // Set the sector index
                 temp.fileEntInf.lfnEntryIndex = 0;       // Set the entry index
             }
-            temp.fileEntInf.entryIndex = pFolder->entryIndex % 16; // Set the entry index
-            temp.fileEntInf.Cluster = currentCluster;              // Set the cluster index
-            temp.fileEntInf.sectorIndex = sectorIndex;             // Set the sector index
-            pFolder->entryIndex++;                                 // Increment the entry index
+            temp.fileEntInf.entryIndex = pDir->entryIndex % 16; // Set the entry index
+            temp.fileEntInf.Cluster = currentCluster;           // Set the cluster index
+            temp.fileEntInf.sectorIndex = sectorIndex;          // Set the sector index
+            pDir->entryIndex++;                                 // Increment the entry index
             break;
         }
         else
         {
-            if (!dirNextEntryExists(pFolder, &sectorIndex, &currentCluster))
+            if (!dirNextEntryExists(pDir, &sectorIndex, &currentCluster))
             {
                 memset(&temp, 0, sizeof(file));
                 return temp;
@@ -528,28 +583,21 @@ file fileGetNext(file *pFolder)
  *
  * @brief Checks if a file exists in the given directory.
  * @param[in] file The name of the file to search for.
- * @param[in] pFolder The directory to search in.
+ * @param[in] pDir The directory to search in.
  * @return The file if it exists, otherwise an empty file.
  */
-file fileExists(file *pFolder, const char *filename)
+static file fileExists(file *pDir, const char *filename)
 {
     file tempFile = {0};
 
     do
     {
-        tempFile = fileGetNext(pFolder);
+        tempFile = fileGetNext(pDir);
         if (fileIsValid(&tempFile))
         {
-            uint8_t nameIndx;
             char *tempFileName = fileGetName(&tempFile);
-            // Compare the file name with the given file name
-            for (nameIndx = 0; nameIndx < strlen(filename); nameIndx++)
-            {
-                if (filename[nameIndx] != tempFileName[nameIndx])
-                    break;
-            }
-            // If the file name matches, return the file
-            if (nameIndx == strlen(filename) && nameIndx == strlen(tempFileName))
+
+            if (strcmp(filename, tempFileName) == 0)
             {
                 return tempFile;
             }
@@ -572,7 +620,7 @@ static file pathExists(const char *path)
     // If the path is the root directory, return the root directory
     if (strlen(path) == 1 && path[0] == '/')
     {
-        return tempFile;
+        goto exit;
     }
 
     // Iterate through the path and find the file
@@ -580,7 +628,7 @@ static file pathExists(const char *path)
     uint8_t charCnt = 0;
     while (path[charCnt] != '\0')
     {
-        char dirName[36] = ""; // Store the name of the current directory
+        char pathFragment[36] = "";
         for (uint8_t i = index + 1; i < index + 36; i++)
         {
             charCnt++;
@@ -590,17 +638,12 @@ static file pathExists(const char *path)
             {
                 break;
             }
-            dirName[charCnt - index - 1] = path[i]; // Store the current directory name
+            pathFragment[charCnt - index - 1] = path[i]; // Store the current directory name
         }
-        index = charCnt;                           // Move the index to the next directory
-        tempFile = fileExists(&tempFile, dirName); // Check if the file exists
-
-        // If the file is not found, return an empty file
-        if (fileStartCluster(&tempFile) == 0)
-        {
-            return tempFile;
-        }
+        index = charCnt;                                // Move the index to the next directory
+        tempFile = fileExists(&tempFile, pathFragment); // Check if the file exists
     }
+exit:
     return tempFile; // Return the file if it is found
 }
 
@@ -782,16 +825,16 @@ bool listDirectory(const char *path)
  * handles subdirectories and prints the contents of each subdirectory
  * indented to show the hierarchy.
  *
- * @param[in] pFolder Pointer to the directory to list
+ * @param[in] pDir Pointer to the directory to list
  * @param[in] tab Number of tabs to indent the output
  */
-void listDirectoryRecursive(file *pFolder, uint8_t tab)
+void listDirectoryRecursive(file *pDir, uint8_t tab)
 {
     file tempFile;
 
     do
     {
-        tempFile = fileGetNext(pFolder);
+        tempFile = fileGetNext(pDir);
         if (fileIsValid(&tempFile))
         {
             if (fileIsDirectory(&tempFile))
@@ -825,8 +868,8 @@ uint8_t fileReadByte(file *pFile)
     static uint32_t Cluster = 0;    // Current cluster being read
     static uint8_t sectorIndex = 0; // Current sector index within the cluster
 
-    // Check if the file is closed
-    if (fileIsClosed(pFile))
+    // Check if the file is closed or file is not open for reading
+    if (fileIsClosed(pFile) || !(pFile->accessMode & FILE_MODE_READ))
     {
         return 0;
     }
@@ -1445,13 +1488,13 @@ static file fileCreate(file *pathDir, const char *filename, bool isDir)
     if (sd_write_sector(startSectorOfCluster(freeEntInf.Cluster) + freeEntInf.sectorIndex, sdBuffer) == SD_WRITE_SUCCESS)
     {
         PRINTF("File Created!\n");
-        return newFile;
     }
     else
     {
         memset(&newFile, 0, sizeof(file));
-        return newFile;
     }
+
+    return newFile;
 }
 
 /**
@@ -1466,18 +1509,13 @@ static file fileCreate(file *pathDir, const char *filename, bool isDir)
  * @return The file structure if the file was opened successfully, otherwise an
  *         empty file structure
  */
-file fileOpen(const char *path, const char *filename)
+file fileOpen(const char *path, const char *filename, uint8_t accessMode)
 {
     file pathDir = pathExists(path);
 
-    if (fileStartCluster(&pathDir) == 0)
+    if ((fileStartCluster(&pathDir) == 0) || !fileIsDirectory(&pathDir))
     {
-        PRINTF("Invalid path!\n");
-        return pathDir;
-    }
-    else if (filename == NULL)
-    {
-        // Return the parent directory if filename is NULL
+        PRINTF("Path does not exist!\n");
         return pathDir;
     }
     else
@@ -1485,16 +1523,51 @@ file fileOpen(const char *path, const char *filename)
         // Check if the file already exists in the directory
         file tempFile = fileExists(&pathDir, filename);
 
-        if (fileStartCluster(&tempFile) != 0)
+        // If the file doesn't exist, create a new file
+        if (!fileIsValid(&tempFile))
         {
-            // If the file already exists, return the existing file
+            if (accessMode & FILE_MODE_WRITE)
+            {
+                PRINTF("File doesn't exist, creating new file\n");
+                tempFile = fileCreate(&pathDir, filename, false);
+                if (fileIsValid(&tempFile)) // Check if the file was created successfully
+                {
+                    tempFile.accessMode = accessMode;
+                }
+            }
+        }
+        else
+        {
             PRINTF("File exists!\n");
-            return tempFile;
+            tempFile.accessMode = accessMode;
         }
 
-        // If the file does not exist, create a new file
-        return fileCreate(&pathDir, filename, false);
+        return tempFile;
     }
+}
+
+/**
+ * @brief Opens a directory at the specified path.
+ *
+ * This function checks if the given path points to a directory
+ * and returns the file structure representing the directory. If
+ * the path does not point to a valid directory, an empty file
+ * structure is returned.
+ *
+ * @param[in] path The path to the directory to open.
+ * @return The file structure of the directory if it exists, otherwise
+ *         an empty file structure.
+ */
+file openDirectory(const char *path)
+{
+    // Check if the path exists and is a directory
+    file direcotry = pathExists(path);
+    if (!fileIsDirectory(&direcotry))
+    {
+        // If not a directory, return an empty file structure
+        memset(&direcotry, 0, sizeof(file));
+    }
+    return direcotry;
 }
 
 /**
@@ -1504,10 +1577,10 @@ file fileOpen(const char *path, const char *filename)
  * If the directory already exists, it returns the existing directory.
  *
  * @param[in] path The path where the directory should be created
- * @param[in] dirName The name of the directory to be created
+ * @param[in] name The name of the directory to be created
  * @return The created directory file structure if successful, otherwise the existing directory or invalid path
  */
-file createDirectory(const char *path, const char *dirName)
+file createDirectory(const char *path, const char *name)
 {
     // Check if the specified path exists
     file parentDir = pathExists(path);
@@ -1520,7 +1593,7 @@ file createDirectory(const char *path, const char *dirName)
     }
 
     // Check if the directory already exists in the specified path
-    file thisDir = fileExists(&parentDir, dirName);
+    file thisDir = fileExists(&parentDir, name);
 
     // If the directory exists, return the existing directory
     if (fileStartCluster(&thisDir) != 0)
@@ -1530,7 +1603,7 @@ file createDirectory(const char *path, const char *dirName)
     }
 
     // Create the new directory
-    thisDir = fileCreate(&parentDir, dirName, true);
+    thisDir = fileCreate(&parentDir, name, true);
 
     // Get the start cluster of the new directory
     uint32_t dirStartClus = fileStartCluster(&thisDir);
@@ -1577,6 +1650,13 @@ file createDirectory(const char *path, const char *dirName)
  */
 bool fileWrite(file *pFile, const char *data)
 {
+
+    // Check if the file is open for writing
+    if (!(pFile->accessMode & FILE_MODE_WRITE))
+    {
+        return false;
+    }
+
     uint32_t currentCluster = fileStartCluster(pFile);                   // Get the starting cluster
     uint16_t byteIndex = pFile->DIR_FileSize % params.BPB_BytesPerSec;   // Calculate byte offset in sector
     uint32_t sectorIndex = pFile->DIR_FileSize / params.BPB_BytesPerSec; // Calculate sector index
@@ -1603,7 +1683,9 @@ bool fileWrite(file *pFile, const char *data)
 
     // Read the current sector if not starting at the beginning
     if (byteIndex != 0)
+    {
         sd_read_sector(startSectorOfCluster(currentCluster) + sectorIndex, sdBuffer);
+    }
 
     // Write data to sectors
     for (uint32_t sector = sectorIndex; sector < params.BPB_SecPerClus; sector++)
@@ -1620,7 +1702,9 @@ bool fileWrite(file *pFile, const char *data)
         byteIndex = 0;
 
         if (sd_write_sector(startSectorOfCluster(currentCluster) + sector, sdBuffer) == SD_WRITE_ERROR)
+        {
             return false;
+        }
 
         // Update file size and metadata if all data has been written
         if (!moreData)
@@ -1632,7 +1716,9 @@ bool fileWrite(file *pFile, const char *data)
                 file *p_temp = (file *)(sdBuffer + pFile->fileEntInf.entryIndex * 32);
                 memcpy(p_temp, pFile, 32);
                 if (sd_write_sector(startSectorOfCluster(pFile->fileEntInf.Cluster) + pFile->fileEntInf.sectorIndex, sdBuffer) == SD_WRITE_SUCCESS)
+                {
                     return true;
+                }
             }
             return false;
         }
