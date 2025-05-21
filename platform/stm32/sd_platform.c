@@ -39,15 +39,6 @@ static void Error_Handler(void)
     /* USER CODE END Error_Handler_Debug */
 }
 
-static inline uint8_t SPI_transfer(uint8_t tx_Byte)
-{
-    uint8_t rx_Byte;
-    HAL_SPI_TransmitReceive(&hspi1, &tx_Byte, &rx_Byte, 1, HAL_MAX_DELAY);
-    while (hspi1.State == HAL_SPI_STATE_BUSY)
-        ; // wait xmission complete
-    return rx_Byte;
-}
-
 void sd_spi_init(void)
 {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
