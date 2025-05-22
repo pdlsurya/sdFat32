@@ -21,8 +21,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-#ifndef __MYSDFAT_H
-#define __MYSDFAT_H
+#ifndef __SD_FAT32_H
+#define __SD_FAT32_H
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -131,13 +131,13 @@ extern "C"
         uint8_t accessMode;
     } file;
 
-    bool fat32Init();
+    bool sdFat32Init();
 
     file fileOpen(const char *path, const char *filename, uint8_t accessMode);
 
     uint8_t fileReadByte(file *pFile);
 
-    bool fileWrite(file *pFile, const char *data);
+    bool fileWrite(file *pFile, const uint8_t *data, uint32_t len);
 
     bool fileDelete(const char *path, const char *filename);
 

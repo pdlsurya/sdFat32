@@ -38,7 +38,7 @@ static spi_inst_t *spi = spi0;
 
 void sd_spi_init(void)
 {
-    spi_init(spi, 20000000);
+    spi_init(spi, 16000000);
     spi_set_format(spi, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
 
     gpio_set_function(SD_SCK_PIN, GPIO_FUNC_SPI);

@@ -35,8 +35,10 @@ static void sd_powerup_sequence()
     sd_delay_ms(10);
 
     // send 80 clock cycles to synchronize
-    for (uint8_t i = 0; i < 20; i++)
+    for (uint8_t i = 0; i < 10; i++)
+    {
         sd_spi_transfer(0xFF);
+    }
 
     // deselect SD card
     sd_cs_deselect();
@@ -69,7 +71,9 @@ static uint8_t sd_read_res1()
 
         // if no data received for 8 bytes, break
         if (i > 8)
+        {
             break;
+        }
     }
 
     return res1;
@@ -103,7 +107,9 @@ static void sd_read_res3_7(uint8_t *res)
 
     // if error reading R1, return
     if (res[0] > 1)
+    {
         return;
+    }
 
     // read remaining bytes
     res[1] = sd_spi_transfer(0xFF);
@@ -205,19 +211,33 @@ static void sd_print_res1(uint8_t res)
         return;
     }
     if (PARAM_ERROR(res))
+    {
         PRINTF("\tParameter Error\r\n");
+    }
     if (ADDR_ERROR(res))
+    {
         PRINTF("\tAddress Error\r\n");
+    }
     if (ERASE_SEQ_ERROR(res))
+    {
         PRINTF("\tErase Seq Error\r\n");
+    }
     if (CRC_ERROR(res))
+    {
         PRINTF("\tCRC Error\r\n");
+    }
     if (ILLEGAL_CMD(res))
+    {
         PRINTF("\tIllegal Cmd\r\n");
+    }
     if (ERASE_RESET(res))
+    {
         PRINTF("\tErase Rst Error\r\n");
+    }
     if (IN_IDLE(res))
+    {
         PRINTF("Idle State\r\n");
+    }
 }
 
 static void sd_print_res7(uint8_t *res)
@@ -225,21 +245,33 @@ static void sd_print_res7(uint8_t *res)
     sd_print_res1(res[0]);
 
     if (res[0] > 1)
+    {
         return;
+    }
 
     PRINTF("Command Version: %X", CMD_VER(res[1]));
 
     PRINTF("\tVoltage Accepted: ");
     if (VOL_ACC(res[3]) == VOLTAGE_ACC_27_33)
+    {
         PRINTF("2.7-3.6V\r\n");
+    }
     else if (VOL_ACC(res[3]) == VOLTAGE_ACC_LOW)
+    {
         PRINTF("LOW VOLTAGE\r\n");
+    }
     else if (VOL_ACC(res[3]) == VOLTAGE_ACC_RES1)
+    {
         PRINTF("RESERVED\r\n");
+    }
     else if (VOL_ACC(res[3]) == VOLTAGE_ACC_RES2)
+    {
         PRINTF("RESERVED\r\n");
+    }
     else
+    {
         PRINTF("NOT DEFINED\n");
+    }
 
     PRINTF("\tEcho: %x", res[4]);
 }
@@ -249,7 +281,9 @@ static void sd_print_res3(uint8_t *res)
     sd_print_res1(res[0]);
 
     if (res[0] > 1)
+    {
         return;
+    }
 
     PRINTF("\tCard Power Up Status: ");
     if (POWER_UP_STATUS(res[1]))
@@ -261,7 +295,9 @@ static void sd_print_res3(uint8_t *res)
             PRINTF("1\r\n");
         }
         else
+        {
             PRINTF("0\r\n");
+        }
     }
     else
     {
@@ -270,36 +306,62 @@ static void sd_print_res3(uint8_t *res)
 
     PRINTF("\tVDD Window: ");
     if (VDD_2728(res[3]))
+    {
         PRINTF("2.7-2.8, ");
+    }
     if (VDD_2829(res[2]))
+    {
         PRINTF("2.8-2.9, ");
+    }
     if (VDD_2930(res[2]))
+    {
         PRINTF("2.9-3.0, ");
+    }
     if (VDD_3031(res[2]))
+    {
         PRINTF("3.0-3.1, ");
+    }
     if (VDD_3132(res[2]))
+    {
         PRINTF("3.1-3.2, ");
+    }
     if (VDD_3233(res[2]))
+    {
         PRINTF("3.2-3.3, ");
+    }
     if (VDD_3334(res[2]))
+    {
         PRINTF("3.3-3.4, ");
+    }
     if (VDD_3435(res[2]))
+    {
         PRINTF("3.4-3.5, ");
+    }
     if (VDD_3536(res[2]))
+    {
         PRINTF("3.5-3.6");
+    }
     PRINTF("\r\n");
 }
 
 static void sd_print_data_err_token(uint8_t token)
 {
     if (SD_TOKEN_OOR(token))
+    {
         PRINTF("\tData out of range\r\n");
+    }
     if (SD_TOKEN_CECC(token))
+    {
         PRINTF("\tCard ECC failed\r\n");
+    }
     if (SD_TOKEN_CC(token))
+    {
         PRINTF("\tCC Error\r\n");
+    }
     if (SD_TOKEN_ERROR(token))
+    {
         PRINTF("\tError\r\n");
+    }
 }
 
 static sd_ret_t sd_read_start(uint8_t *buf, uint16_t read_len, uint8_t *token)
@@ -321,7 +383,9 @@ static sd_ret_t sd_read_start(uint8_t *buf, uint16_t read_len, uint8_t *token)
 
             timeout--;
             if (timeout == 0)
+            {
                 break;
+            }
             sd_delay_ms(1);
         }
 
@@ -330,7 +394,9 @@ static sd_ret_t sd_read_start(uint8_t *buf, uint16_t read_len, uint8_t *token)
         {
             // read 512 byte block
             for (uint16_t i = 0; i < read_len; i++)
+            {
                 *buf++ = sd_spi_transfer(0xFF);
+            }
 
             // read 16-bit CRC
             sd_spi_transfer(0xFF);
@@ -343,8 +409,6 @@ static sd_ret_t sd_read_start(uint8_t *buf, uint16_t read_len, uint8_t *token)
 
     return res1;
 }
-
-
 
 sd_ret_t sd_read_sector(uint32_t addr, uint8_t *buf)
 {
@@ -414,14 +478,18 @@ sd_ret_t sd_write_sector(uint32_t addr, uint8_t *buf)
 
         // write buffer to card
         for (uint16_t i = 0; i < SD_BLOCK_LEN; i++)
+        {
             sd_spi_transfer(buf[i]);
+        }
         // wait for a response (timeout = 250ms)
         timeout = SD_WRITE_TIMEOUT;
 
         while (timeout--)
         {
             if ((read = sd_spi_transfer(0xFF)) != 0xFF)
+            {
                 break;
+            }
             sd_delay_ms(1);
         }
         // if data accepted
@@ -452,9 +520,14 @@ sd_ret_t sd_write_sector(uint32_t addr, uint8_t *buf)
     if (res1 == SD_READY)
     {
         if (token == 0x05)
+        {
             return SD_WRITE_SUCCESS;
+        }
+
         else if (token == 0xFF || token == 0x00)
+        {
             return SD_WRITE_ERROR;
+        }
     }
 
     sd_print_res1(res1);
@@ -491,14 +564,14 @@ sd_ret_t sd_init()
     sd_send_if_cond_cmd(res);
     if (res[0] != 0x01)
     {
-         sd_print_res1(res[0]);
+        sd_print_res1(res[0]);
         return SD_INIT_ERROR;
     }
 
     // check echo pattern
     if (res[4] != 0xAA)
     {
-         sd_print_res7(res);
+        sd_print_res7(res);
         return SD_INIT_ERROR;
     }
 
@@ -507,7 +580,9 @@ sd_ret_t sd_init()
     do
     {
         if (cmd_attempts > 100)
+        {
             return SD_INIT_ERROR;
+        }
 
         // send app cmd
         res[0] = sd_send_app_cmd();
@@ -529,7 +604,7 @@ sd_ret_t sd_init()
     // check card is ready
     if (!(res[1] & 0x80))
     {
-         sd_print_res3(res);
+        sd_print_res3(res);
         return SD_INIT_ERROR;
     }
 
