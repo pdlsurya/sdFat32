@@ -31,6 +31,7 @@ A lightweight FAT32 driver for microcontrollers interfacing with SD cards over S
 
 3. **Initialize and use the driver**:
     ```c
+    #include "fat32.h"
     if (fat32Init()) {
         file myFile = fileOpen("/", "example.txt");
         if (fileIsValid(&myFile)) {
