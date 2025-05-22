@@ -5,7 +5,7 @@ A lightweight FAT32 driver for microcontrollers interfacing with SD cards over S
 ## Features
 
 - FAT32 support for SD cards via SPI
-- Read/write file operations
+- Read/write/delete file operations
 - Directory listing and recursive traversal
 - Long File Name (LFN) support
 - Directory creation and deletion
