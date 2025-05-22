@@ -47,10 +47,9 @@ A lightweight FAT32 driver for microcontrollers interfacing with SD cards over S
 | Function | Description |
 |----------|-------------|
 | `fat32Init()` | Initializes the FAT32 file system |
-| `fileOpen(path, filename)` | Opens a file for reading or writing |
+| `fileOpen(path, filename,accessMode)` | Opens a file for reading or writing |
 | `fileReadByte(pFile)` | Reads a single byte from a file |
 | `fileWrite(pFile, data)` | Writes a string to a file |
-| `fileExists(pFolder, filename)` | Checks if a file exists in a folder |
 | `fileDelete(path, filename)` | Deletes a file |
 | `fileGetNext(pFile)` | Iterates to the next file in a directory |
 | `fileGetName(pFile)` | Returns the full name of a file (including extension) |
