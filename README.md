@@ -33,7 +33,7 @@ A lightweight FAT32 driver for microcontrollers interfacing with SD cards over S
     ```c
     #include "fat32.h"
     if (fat32Init()) {
-        file myFile = fileOpen("/", "example.txt");
+        file myFile = fileOpen("/", "example.txt", FILE_MODE_READ);
         if (fileIsValid(&myFile)) {
             uint8_t byte = fileReadByte(&myFile);
             // Process byte...
