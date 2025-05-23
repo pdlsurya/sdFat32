@@ -26,9 +26,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "USB_Serial.h"
 
-#define PRINTF USB_SerialPrint
+#define PRINTF(...) 
 
 void sd_spi_init(void);
 
