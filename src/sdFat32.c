@@ -1694,7 +1694,7 @@ bool fileWrite(file *pFile, const uint8_t *data, uint32_t len)
 {
 
 	// Check if the file is open for writing or appending
-	if (!((pFile->accessMode & FA_WRITE) || (pFile->accessMode & FA_APPEND)))
+	if (!(pFile->accessMode & (FA_WRITE | FA_APPEND)))
 	{
 		return false;
 	}
