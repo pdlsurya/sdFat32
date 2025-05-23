@@ -386,7 +386,7 @@ char *fileGetName(file *pFile)
  * @param[in] file_name The file name from which to extract the extension.
  * @return A pointer to a string containing the file extension.
  */
-char *fileGetExtension(char *file_name)
+char *fileGetExtension(const char *file_name)
 {
 	static char ext[5] = ""; /**< Buffer to store the file extension. */
 
@@ -1544,45 +1544,51 @@ static file fileCreate(file *pathDir, const char *filename, bool isDir)
  *
  * @param[in] path The path to the directory containing the file.
  * @param[in] filename The name of the file to open.
- * @param[in] accessMode The mode in which to open the file (e.g., read, write).
+ * @param[in] accessMode The mode in which to open the file (e.g., read, write, append).
  * @return The file structure representing the opened or newly created file, or an
  *         invalid file structure if the path does not exist or file creation fails.
  */
 file fileOpen(const char *path, const char *filename, uint8_t accessMode)
 {
-	// Check if the specified path exists and is a directory
-	file pathDir = pathExists(path);
-	if ((fileStartCluster(&pathDir) == 0) || !fileIsDirectory(&pathDir))
-	{
-		PRINTF("Path does not exist!\n");
-		return pathDir; // Return the directory file if path is invalid
-	}
-	else
-	{
-		// Check if the file already exists in the directory
-		file tempFile = fileExists(&pathDir, filename);
+	file tempFile = {0};
 
-		// If the file doesn't exist and writing is allowed, create a new file
-		if (!fileIsValid(&tempFile))
+	// Check if both writing and appending is allowed. If so, return an invalid file, otherwise continue.
+	if (!((accessMode & FA_WRITE) && (accessMode & FA_APPEND)))
+	{
+
+		// Check if the specified path exists and is a directory
+		file pathDir = pathExists(path);
+		if ((fileStartCluster(&pathDir) == 0) || !fileIsDirectory(&pathDir))
 		{
-			if (accessMode & FA_WRITE)
-			{
-				PRINTF("File doesn't exist, creating new file\n");
-				tempFile = fileCreate(&pathDir, filename, false);
-				if (fileIsValid(&tempFile)) // Check if the file was created successfully
-				{
-					tempFile.accessMode = accessMode;
-				}
-			}
+			PRINTF("Path does not exist!\n");
+			return pathDir; // Return the directory file if path is invalid
 		}
 		else
 		{
-			PRINTF("File exists!\n");
-			tempFile.accessMode = accessMode; // Set the access mode for the existing file
-		}
+			// Check if the file already exists in the directory
+			tempFile = fileExists(&pathDir, filename);
 
-		return tempFile; // Return the file structure
+			// If the file doesn't exist and writing or appending is allowed, create a new file
+			if (!fileIsValid(&tempFile))
+			{
+				if (accessMode & (FA_WRITE | FA_APPEND))
+				{
+					PRINTF("File doesn't exist, creating new file\n");
+					tempFile = fileCreate(&pathDir, filename, false);
+					if (fileIsValid(&tempFile)) // Check if the file was created successfully
+					{
+						tempFile.accessMode = accessMode;
+					}
+				}
+			}
+			else
+			{
+				PRINTF("File exists!\n");
+				tempFile.accessMode = accessMode; // Set the access mode for the existing file
+			}
+		}
 	}
+	return tempFile; // Return the file structure
 }
 
 /**
