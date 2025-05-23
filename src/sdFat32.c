@@ -237,25 +237,6 @@ bool fileIsValid(file *pFile)
 }
 
 /**
- * @brief Check if a file is closed
- *
- * This function checks if a file is closed by verifying that the start cluster
- * of the file is zero and the file size is zero.
- *
- * @param[in] pFile Pointer to file structure
- * @return true if the file is closed, false otherwise
- */
-static inline bool fileIsClosed(file *pFile)
-{
-	// Check if the file is closed by verifying that the start cluster is zero and the file size is zero
-	if ((fileStartCluster(pFile) == 0) && (pFile->DIR_FileSize == 0))
-	{
-		return true;
-	}
-	return false;
-}
-
-/**
  * @brief Check if the next entry in the directory exists
  *
  * This function checks if the next entry in the directory exists. If the next
@@ -413,25 +394,19 @@ char *fileGetExtension(char *file_name)
 
 	uint8_t idx = 0; /**< Index of the current character in the file name. */
 
-	/**
-	 * Loop until we reach the dot (.) or the end of the string.
-	 */
+	// Loop until we reach the dot (.) or the end of the string.
 	while (file_name[idx] != '.')
 	{
 		idx++;
-		/**
-		 * If we have reached the end of the string without finding a dot,
-		 * return an empty string.
-		 */
+
+		// If we have reached the end of the string without finding a dot, return an empty string.
 		if (idx == strlen(file_name))
 		{
 			return ext;
 		}
 	}
 
-	/**
-	 * Copy the characters after the dot to the ext buffer.
-	 */
+	// Copy the characters after the dot to the ext buffer.
 	strcpy(ext, &file_name[idx + 1]);
 
 	return ext;
@@ -851,23 +826,26 @@ void listDirectoryRecursive(file *pDir, uint8_t tab)
 }
 
 /**
- * @brief Reads a byte from the file
+ * @brief Reads data from a file on the SD card
  *
- * This function reads a byte from the given file. It handles sector and cluster
- * transitions as the file is read sequentially.
+ * This function reads the specified length of data from the file into the provided buffer.
+ * It handles cluster transitions and updates the file's entry index accordingly.
  *
- * @param[in] pFile Pointer to the file structure
- * @return The byte read from the file, or 0 if the file is closed, file is not open for reading or end of file is reached
+ * @param[in] pFile Pointer to the file structure to read from
+ * @param[out] buffer Pointer to the buffer to store the read data
+ * @param[in] len Length of the data to be read
+ * @return Number of bytes successfully read
  */
-uint8_t fileReadByte(file *pFile)
+uint32_t fileRead(file *pFile, uint8_t *buffer, uint32_t len)
 {
 	static uint32_t Cluster = 0;	// Current cluster being read
 	static uint8_t sectorIndex = 0; // Current sector index within the cluster
+	uint32_t idx = 0;				// Index to track bytes read
 
-	// Check if the file is closed or file is not open for reading
-	if (fileIsClosed(pFile) || !(pFile->accessMode & FILE_MODE_READ))
+	// Check if the file is invalid or not open for reading
+	if (!fileIsValid(pFile) || !(pFile->accessMode & FA_READ))
 	{
-		return 0;
+		goto done;
 	}
 
 	// Initialize cluster and sectorIndex if at the start of the file
@@ -877,27 +855,39 @@ uint8_t fileReadByte(file *pFile)
 		sectorIndex = 0;
 	}
 
-	// Check if we need to move to the next cluster
-	if ((pFile->entryIndex > 0) && (pFile->entryIndex % (params.BPB_SecPerClus * params.BPB_BytesPerSec) == 0))
+	while (len > 0)
 	{
-		sectorIndex = 0;
-		Cluster = fatNextCluster(Cluster);
-		// If end of cluster chain is reached, reset entry index and return 0
-		if (Cluster >= FAT_EOC)
+		// Check if we need to move to the next cluster
+		if ((pFile->entryIndex > 0) && (pFile->entryIndex % (params.BPB_SecPerClus * params.BPB_BytesPerSec) == 0))
 		{
-			pFile->entryIndex = 0;
-			return 0;
+			sectorIndex = 0;
+			Cluster = fatNextCluster(Cluster);
+			// If end of cluster chain is reached, reset entry index and exit
+			if (Cluster >= FAT_EOC)
+			{
+				pFile->entryIndex = 0;
+				goto done;
+			}
 		}
+
+		// Read the next sector if needed
+		if ((pFile->entryIndex % params.BPB_BytesPerSec) == 0)
+		{
+			if (sd_read_sector(startSectorOfCluster(Cluster) + sectorIndex++, sdBuffer) == SD_READ_ERROR)
+			{
+				// Exit if read fails
+				goto done;
+			}
+		}
+
+		// Copy data from the buffer to the output and update indices
+		buffer[idx++] = sdBuffer[pFile->entryIndex % params.BPB_BytesPerSec];
+		pFile->entryIndex++;
+		len--;
 	}
 
-	// Read the next sector if needed
-	if (pFile->entryIndex % params.BPB_BytesPerSec == 0)
-	{
-		sd_read_sector(startSectorOfCluster(Cluster) + (sectorIndex++), sdBuffer);
-	}
-
-	// Return the next byte from the buffer
-	return sdBuffer[(pFile->entryIndex++) % params.BPB_BytesPerSec];
+done:
+	return idx; // Return the number of bytes successfully read
 }
 
 /**
@@ -1371,7 +1361,7 @@ static file fileCreate(file *pathDir, const char *filename, bool isDir)
 	uint8_t lfnEntCnt;
 
 	// Check if filename requires long file name (LFN) entries
-	if (mixedLetters(filename) || (fileNameLength(filename) > 8))
+	if (mixedLetters(filename) || (fileNameLength(filename) > 8) || (strlen(fileGetExtension(filename)) > 3))
 	{
 		for (uint8_t i = 0; i < strlen(filename); i++)
 		{
@@ -1575,7 +1565,7 @@ file fileOpen(const char *path, const char *filename, uint8_t accessMode)
 		// If the file doesn't exist and writing is allowed, create a new file
 		if (!fileIsValid(&tempFile))
 		{
-			if (accessMode & FILE_MODE_WRITE)
+			if (accessMode & FA_WRITE)
 			{
 				PRINTF("File doesn't exist, creating new file\n");
 				tempFile = fileCreate(&pathDir, filename, false);
@@ -1690,9 +1680,9 @@ file createDirectory(const char *path, const char *name)
 }
 
 /**
- * @brief Writes data to a file on the SD card
+ * @brief Writes or appends data to a file on the SD card
  *
- * This function writes the provided data to the specified file. It handles
+ * This function writes or appends the provided data to the specified file. It handles
  * cluster allocation and updates the file's metadata accordingly.
  *
  * @param[in] pFile Pointer to the file structure to write to
@@ -1703,18 +1693,24 @@ file createDirectory(const char *path, const char *name)
 bool fileWrite(file *pFile, const uint8_t *data, uint32_t len)
 {
 
-	// Check if the file is open for writing
-	if (!(pFile->accessMode & FILE_MODE_WRITE))
+	// Check if the file is open for writing or appending
+	if (!((pFile->accessMode & FA_WRITE) || (pFile->accessMode & FA_APPEND)))
 	{
 		return false;
 	}
 
-	uint32_t currentCluster = fileStartCluster(pFile);					 // Get the starting cluster
-	uint16_t byteIndex = pFile->DIR_FileSize % params.BPB_BytesPerSec;	 // Calculate byte offset in sector
-	uint32_t sectorIndex = pFile->DIR_FileSize / params.BPB_BytesPerSec; // Calculate sector index
-	uint32_t clusterCnt = (sectorIndex / params.BPB_SecPerClus) + 1;	 // Calculate number of clusters
-	uint32_t byteCnt = 0;
-	bool moreData = true;
+	// File cannot be opened for both writing and appending
+	if ((pFile->accessMode & FA_WRITE) && (pFile->accessMode & FA_APPEND))
+	{
+		return false;
+	}
+
+	uint32_t currentCluster = fileStartCluster(pFile);														  // Get the starting cluster
+	uint16_t byteIndex = (pFile->accessMode & FA_WRITE) ? 0 : (pFile->DIR_FileSize % params.BPB_BytesPerSec); // Calculate byte offset in sector
+	uint32_t sectorIndex = (pFile->accessMode & FA_WRITE) ? 0 : pFile->DIR_FileSize / params.BPB_BytesPerSec; // Calculate sector index
+	uint32_t clusterCnt = (sectorIndex / params.BPB_SecPerClus) + 1;										  // Calculate number of clusters
+	uint32_t byteCnt = 0;																					  // Counter for number of bytes written
+	bool moreData = true;																					  // Flag to indicate if there is more data to write
 
 	sectorIndex = sectorIndex % params.BPB_SecPerClus; // Normalize sector index within cluster
 	uint32_t tempCluster;
@@ -1761,14 +1757,17 @@ bool fileWrite(file *pFile, const uint8_t *data, uint32_t len)
 		// Update file size and metadata if all data has been written
 		if (!moreData)
 		{
-			pFile->DIR_FileSize += len;
+			pFile->DIR_FileSize = (pFile->accessMode & FA_WRITE) ? len : pFile->DIR_FileSize + len;
 
+			// Read the file entry
 			if (sd_read_sector(startSectorOfCluster(pFile->fileEntInf.Cluster) + pFile->fileEntInf.sectorIndex, sdBuffer) == SD_READ_SUCCESS)
 			{
 				file *p_temp = (file *)(sdBuffer + pFile->fileEntInf.entryIndex * 32);
 
+				// Update the file entry
 				memcpy(p_temp, pFile, 32);
 
+				// Write the file entry
 				if (sd_write_sector(startSectorOfCluster(pFile->fileEntInf.Cluster) + pFile->fileEntInf.sectorIndex, sdBuffer) == SD_WRITE_SUCCESS)
 				{
 					return true;

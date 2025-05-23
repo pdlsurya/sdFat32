@@ -50,8 +50,9 @@ extern "C"
 #define FAT_EOC 0x0FFFFFF8
 
 // File access mode
-#define FILE_MODE_WRITE 0x1
-#define FILE_MODE_READ 0x2
+#define FA_READ 0x1   ///< File access mode read
+#define FA_WRITE 0x2  ///< File access mode write
+#define FA_APPEND 0x4 ///< File access mode append
 
     typedef struct
     {
@@ -135,7 +136,7 @@ extern "C"
 
     file fileOpen(const char *path, const char *filename, uint8_t accessMode);
 
-    uint8_t fileReadByte(file *pFile);
+    uint32_t fileRead(file *pFile, uint8_t *buffer, uint32_t len);
 
     bool fileWrite(file *pFile, const uint8_t *data, uint32_t len);
 
