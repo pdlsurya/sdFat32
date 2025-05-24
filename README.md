@@ -15,7 +15,7 @@ A lightweight FAT32 driver for microcontrollers interfacing with SD cards over S
 
 ### Prerequisites
 
-- A microcontroller (e.g., STM32, ESP32, nRF52,rpi-pico(RP2040/RP2350), etc.)
+- A microcontroller (Currently supported platform:`Arduino`, `STM32`, `ESP32C6`, `nRF52`,`rpi-pico(RP2040/RP2350)`)
 - SPI driver for your target MCU
 
 ### Integration
@@ -26,36 +26,46 @@ A lightweight FAT32 driver for microcontrollers interfacing with SD cards over S
     ```
 
 2. **Add to your project**:
-   - Include the `fat32.h` and corresponding `.c` files in your build system.
-   - Include the `sd_platform.h` and corresponding `.c` file for selected platform.
+
+- ***Add the src/ folder***:
+  Include the src/ folder of the SdFat32 library into your project. This contains the core source files required to use the library.
+- ***Add your platform/ folder***:
+Include the folder that matches your platform (e.g., `platform/rpi-pico/`, `platform/stm32/`, etc.) along with the source file inside it. This contains platform-specific implementations needed for SdFat32 to work properly on your hardware.
 
 3. **Initialize and use the driver**:
-    ```c
-    #include "fat32.h"
-    if (fat32Init()) {
-        file myFile = fileOpen("/", "example.txt", FILE_MODE_READ);
+
+ ```c
+    #include "sdFat32.h"
+
+    uint8_t data[8];
+   
+    if (sdFat32Init()) {
+        file myFile = fileOpen("/", "example.txt", FA_READ);
         if (fileIsValid(&myFile)) {
-            uint8_t byte = fileReadByte(&myFile);
-            // Process byte...
+            fileRead(&myFile,data,8);
+            // Process data...
             fileClose(&myFile);
         }
     }
-    ```
+
+```
 
 ### File System Functions
 
 | Function | Description |
 |----------|-------------|
-| `fat32Init()` | Initializes the FAT32 file system |
-| `fileOpen(path, filename,accessMode)` | Opens a file for reading or writing |
-| `fileReadByte(pFile)` | Reads a single byte from a file |
-| `fileWrite(pFile, data)` | Writes a string to a file |
+| `sdFat32Init()` | Initializes the FAT32 file system |
+| `fileOpen(path, filename, accessMode)` | Opens a file with corresponding access mode|
+| `fileRead(pFile, data, len)` | Reads from a file |
+| `fileWrite(pFile, data, len)` | Writes to a file|
 | `fileDelete(path, filename)` | Deletes a file |
-| `fileGetNext(pFile)` | Iterates to the next file in a directory |
+| `fileGetNext(pDir)` | Iterates to the next file in a directory |
 | `fileGetName(pFile)` | Returns the full name of a file (including extension) |
+|  `fileIsValid(pFile)` | Checks if a filed is valid |
 | `createDirectory(path, dirName)` | Creates a new subdirectory |
 | `listDirectory(path)` | Lists contents of a directory |
 | `listDirectoryRecursive(pFolder, tab)` | Recursively lists directory contents |
+
 
 ### Notes
 
@@ -70,7 +80,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Author
 
 **Surya Poudel**  
-[GitHub](https://github.com/<your-username>)
+[GitHub](https://github.com/pdlsurya)
 
 ---
 
