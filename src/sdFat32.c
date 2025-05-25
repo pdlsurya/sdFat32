@@ -40,6 +40,8 @@ static uint32_t RootDirSectors;
 static uint32_t DataStartSector;
 static uint32_t DataSectorsCnt;
 
+static char *months[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
 /**
  * @brief Reads boot sector parameters from SD card and stores it in params global variable
  *
@@ -243,16 +245,16 @@ bool fileIsValid(file *pFile)
  * entry exists, it increments the entry index and returns true. Otherwise, it
  * returns false.
  *
- * @param[in,out] pDir pointer to the folder
+ * @param[in,out] entryIndex entry index of the directory
  * @param[in,out] sectorIndex sector index of the next entry
  * @param[in,out] currentCluster current cluster index
  * @return true if the next entry exists, false otherwise
  */
-static bool dirNextEntryExists(file *pDir, uint8_t *sectorIndex, uint32_t *currentCluster)
+static bool dirNextEntryExists(uint32_t *entryIndex, uint8_t *sectorIndex, uint32_t *currentCluster)
 {
-	pDir->entryIndex++; // Increment the entry index
+	(*entryIndex)++; // Increment the entry index
 
-	if ((pDir->entryIndex % 16) == 0) // If reached the end of the sector, read the next sector
+	if (((*entryIndex) % 16) == 0) // If reached the end of the sector, read the next sector
 	{
 		// Increment the sector index
 		(*sectorIndex)++;
@@ -265,7 +267,7 @@ static bool dirNextEntryExists(file *pDir, uint8_t *sectorIndex, uint32_t *curre
 			*currentCluster = fatNextCluster(*currentCluster);
 			if (*currentCluster >= FAT_EOC) // If the end of the FAT is reached, return false
 			{
-				pDir->entryIndex = 2;
+				*entryIndex = 2;
 				return false;
 			}
 		}
@@ -325,17 +327,9 @@ char *fileGetName(file *pFile)
 
 			lfnEntryCnt--;
 
-			entryIndex++;
-
-			if (entryIndex % 16 == 0) // If reached the end of the sector, read the next sector
+			if (!dirNextEntryExists(&entryIndex, &sectorIndex, &currentCluster))
 			{
-				sectorIndex++;
-				if (sectorIndex == params.BPB_SecPerClus) // If the sector index is equal to the number of sectors per cluster
-				{
-					sectorIndex = 0;
-					currentCluster = fatNextCluster(currentCluster); // Move to the next cluster in the FAT
-				}
-				sd_read_sector(startSectorOfCluster(currentCluster) + sectorIndex, sdBuffer); // Read the next sector
+				break;
 			}
 		}
 	}
@@ -499,16 +493,12 @@ file fileGetNext(file *pDir)
 				while (lfnEntCnt > 0)
 				{
 					lfnEntCnt--;
-					pDir->entryIndex++;
-					if (pDir->entryIndex % 16 == 0)
+
+					// Check if next entry in the directory exists
+					if (!dirNextEntryExists(&pDir->entryIndex, &sectorIndex, &currentCluster))
 					{
-						sectorIndex++;
-						if (sectorIndex == params.BPB_SecPerClus)
-						{
-							currentCluster = fatNextCluster(currentCluster);
-							sectorIndex = 0;
-						}
-						sd_read_sector(startSectorOfCluster(currentCluster) + sectorIndex, sdBuffer);
+						memset(&temp, 0, sizeof(file));
+						return temp;
 					}
 				}
 
@@ -534,7 +524,7 @@ file fileGetNext(file *pDir)
 		}
 		else
 		{
-			if (!dirNextEntryExists(pDir, &sectorIndex, &currentCluster))
+			if (!dirNextEntryExists(&pDir->entryIndex, &sectorIndex, &currentCluster))
 			{
 				memset(&temp, 0, sizeof(file));
 				return temp;
@@ -634,11 +624,11 @@ static void displayTime(uint16_t time)
 	uint8_t minutes = (time & 0x07E0) >> 5; // extract minutes (0-59)
 	uint8_t seconds = (time & 0x001F) * 2;	// extract seconds (0-29, in 2-second increments)
 
-	PRINTF(hours > 10 ? "%d" : "0%d", hours); // print hours
+	PRINTF(hours >= 10 ? "%d" : "0%d", hours); // print hours
 	PRINTF(":");
-	PRINTF(minutes > 10 ? "%d" : "0%d", minutes); // print minutes
+	PRINTF(minutes >= 10 ? "%d" : "0%d", minutes); // print minutes
 	PRINTF(":");
-	PRINTF(seconds > 10 ? "%d" : "0%d", seconds); // print seconds
+	PRINTF(seconds >= 10 ? "%d" : "0%d", seconds); // print seconds
 }
 
 /**
@@ -1067,78 +1057,30 @@ static freeEntInf_t getFreeEntry(file *Dir, uint8_t freeEntryCnt)
 static void getDateTimeNumerical(uint16_t *year, uint8_t *month, uint8_t *day,
 								 uint8_t *hour, uint8_t *minute, uint8_t *second)
 {
-	const char *date_str = __DATE__; // e.g. "Apr 12 2023"
-	const char *time_str = __TIME__; // e.g. "23:59:59"
-	char *endptr;
+	const char *dateStr = __DATE__; // e.g. "Apr 12 2023"
+	const char *timeStr = __TIME__; // e.g. "23:59:59"
+	char *endptr;					// Pointer to the end of the parsed string
 
 	// Parse date string
 	char monthStr[4] = {'\0'};
-	memcpy(monthStr, date_str, 3);
-	if (strcmp(monthStr, "Jan") == 0)
+	// Extract month
+	memcpy(monthStr, dateStr, 3);
+
+	for (int i = 0; i < 12; i++)
 	{
-		*month = 1;
+		if (strcmp(monthStr, months[i]) == 0)
+		{
+			*month = i + 1;
+		}
 	}
 
-	else if (strcmp(monthStr, "Feb") == 0)
-	{
-		*month = 2;
-	}
-
-	else if (strcmp(monthStr, "Mar") == 0)
-	{
-		*month = 3;
-	}
-
-	else if (strcmp(monthStr, "Apr") == 0)
-	{
-		*month = 4;
-	}
-
-	else if (strcmp(monthStr, "May") == 0)
-	{
-		*month = 5;
-	}
-
-	else if (strcmp(monthStr, "Jun") == 0)
-	{
-		*month = 6;
-	}
-
-	else if (strcmp(monthStr, "Jul") == 0)
-	{
-		*month = 7;
-	}
-
-	else if (strcmp(monthStr, "Aug") == 0)
-	{
-		*month = 8;
-	}
-
-	else if (strcmp(monthStr, "Sep") == 0)
-	{
-		*month = 9;
-	}
-
-	else if (strcmp(monthStr, "Oct") == 0)
-	{
-		*month = 10;
-	}
-
-	else if (strcmp(monthStr, "Nov") == 0)
-	{
-		*month = 11;
-	}
-
-	else if (strcmp(monthStr, "Dec") == 0)
-	{
-		*month = 12;
-	}
-
-	*day = strtol(date_str + 4, &endptr, 10);
+	// Parse day
+	*day = strtol(dateStr + 4, &endptr, 10);
+	// Parse year
 	*year = strtol(endptr + 1, NULL, 10);
 
 	// Parse time string
-	*hour = strtol(time_str, &endptr, 10);
+	*hour = strtol(timeStr, &endptr, 10);
 	*minute = strtol(endptr + 1, &endptr, 10);
 	*second = strtol(endptr + 1, NULL, 10);
 }
