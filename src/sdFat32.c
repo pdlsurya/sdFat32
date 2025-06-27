@@ -43,7 +43,7 @@ static uint32_t DataSectorsCnt;
 static char *months[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
 /**
- * @brief Reads boot sector parameters from SD card and stores it in params global variable
+ * @brief Reads boot sector parameters from SD card and stores them in params global variable
  *
  * @return true if success, false otherwise
  */
@@ -51,53 +51,19 @@ static bool getBootSecParams(void)
 {
 	if (sd_read_sector(BOOT_SEC_START, sdBuffer) == SD_READ_SUCCESS)
 	{
-		// Sector size in bytes
-		params.BPB_BytesPerSec = (uint16_t)sdBuffer[11];
-		params.BPB_BytesPerSec |= (uint16_t)(sdBuffer[12] << 8);
-
-		// Sectors per allocation unit
-		params.BPB_SecPerClus = sdBuffer[13];
-
-		// Number of reserved sectors
-		params.BPB_RsvdSecCnt = (uint16_t)sdBuffer[14];
-		params.BPB_RsvdSecCnt |= ((uint16_t)sdBuffer[15]) << 8;
-
-		// Total number of sectors on the volume
-		params.BPB_TotSec32 = ((uint32_t)sdBuffer[32]);
-		params.BPB_TotSec32 |= ((uint32_t)sdBuffer[33]) << 8;
-		params.BPB_TotSec32 |= ((uint32_t)sdBuffer[34]) << 16;
-		params.BPB_TotSec32 |= ((uint32_t)sdBuffer[35]) << 24;
-
-		// Number of sectors occupied by one FAT
-		params.BPB_FATSz32 = ((uint32_t)sdBuffer[36]);
-		params.BPB_FATSz32 |= ((uint32_t)sdBuffer[37]) << 8;
-		params.BPB_FATSz32 |= ((uint32_t)sdBuffer[38]) << 16;
-		params.BPB_FATSz32 |= ((uint32_t)sdBuffer[39]) << 24;
-
-		// Number of root directory entries
-		params.BPB_RootEntCnt = (uint16_t)sdBuffer[17];
-		params.BPB_RootEntCnt |= ((uint16_t)sdBuffer[18]) << 8;
-
-		// Number of FAT copies
-		params.BPB_NumFATs = sdBuffer[16];
-
-		// First cluster of root directory
-		params.BPB_RootClus = ((uint32_t)sdBuffer[44]);
-		params.BPB_RootClus |= ((uint32_t)sdBuffer[45]) << 8;
-		params.BPB_RootClus |= ((uint32_t)sdBuffer[46]) << 16;
-		params.BPB_RootClus |= ((uint32_t)sdBuffer[47]) << 24;
-
-		// FS information sector number
-		params.BPB_FSInfo = (uint16_t)(sdBuffer[48]);
-		params.BPB_FSInfo |= ((uint16_t)(sdBuffer[49])) << 8;
-
-		// Volume label
-		memcpy(params.BS_VolLab, &sdBuffer[71], 11);
-		params.BS_VolLab[8] = '\0';
-
+		params.sectorSize = sdBuffer[11] | (sdBuffer[12] << 8);
+		params.sectorsPerCluster = sdBuffer[13];
+		params.reservedSectors = sdBuffer[14] | (sdBuffer[15] << 8);
+		params.totalSectors = sdBuffer[32] | (sdBuffer[33] << 8) | (sdBuffer[34] << 16) | (sdBuffer[35] << 24);
+		params.fatSize = sdBuffer[36] | (sdBuffer[37] << 8) | (sdBuffer[38] << 16) | (sdBuffer[39] << 24);
+		params.rootDirEntries = sdBuffer[17] | (sdBuffer[18] << 8);
+		params.fatCopies = sdBuffer[16];
+		params.rootDirCluster = sdBuffer[44] | (sdBuffer[45] << 8) | (sdBuffer[46] << 16) | (sdBuffer[47] << 24);
+		params.fsInfoSector = sdBuffer[48] | (sdBuffer[49] << 8);
+		memcpy(params.volumeLabel, &sdBuffer[71], 11);
+		params.volumeLabel[8] = '\0';
 		return true;
 	}
-
 	return false;
 }
 
