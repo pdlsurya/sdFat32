@@ -39,13 +39,19 @@ static spi_device_handle_t dev;
 
 void sd_spi_init(void)
 {
+    
     spi_pins_t spi_pins = {.mosi = SD_MOSI_PIN, .miso = SD_MISO_PIN, .sck = SD_SCK_PIN};
-    spi_init(spi_pins);
+    spi_config_t spi_config={0};
+    spi_config.pins=spi_pins;
+    spi_config.port=SPI_GET_HW(2);
+    
+    spi_init(&spi_config);
 
     dev.cs_pin = SD_CS_PIN;
     dev.id = 3;
     dev.speed_hz = 16000000;
     dev.mode = 0;
+    dev.port=spi_config.port;
     spi_device_config(&dev);
 }
 
