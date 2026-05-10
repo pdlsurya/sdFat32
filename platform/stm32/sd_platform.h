@@ -26,8 +26,9 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 
-#define PRINTF(...) 
+#define PRINTF  printf
 
 void sd_spi_init(void);
 

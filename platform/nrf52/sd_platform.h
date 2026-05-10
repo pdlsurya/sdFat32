@@ -26,9 +26,9 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "debug_log.h"
+#include "usb_log.h"
 
-#define PRINTF debug_log_print
+#define PRINTF log_printf
 
 void sd_spi_init(void);
 
