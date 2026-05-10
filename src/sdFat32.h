@@ -34,9 +34,6 @@ extern "C"
 {
 #endif
 
-#define BOOT_SEC_START 0x00002000
-#define FSInfo_SEC 0x00002001
-
 #define ATTR_READ_ONLY 0x01
 #define ATTR_HIDDEN 0x02
 #define ATTR_SYSTEM 0x04
@@ -109,7 +106,7 @@ extern "C"
         uint32_t BPB_FATSz32;
         uint32_t BPB_RootClus;
         uint16_t BPB_FSInfo;
-        char BS_VolLab[11];
+        char BS_VolLab[12];
     } bootSecParams_t;
 
     typedef struct

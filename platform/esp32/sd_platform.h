@@ -27,10 +27,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include "usb_serial.h"
 
 
-#define PRINTF serial_printf // replace with your printf function
+#define PRINTF printf // replace with your printf function
 
 void sd_spi_init(void);
 

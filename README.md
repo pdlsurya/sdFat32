@@ -15,8 +15,10 @@ A lightweight FAT32 driver for microcontrollers interfacing with SD cards over S
 
 ### Prerequisites
 
-- A microcontroller (Currently supported platform:`Arduino`, `STM32`, `ESP32C6`, `nRF52`,`rpi-pico(RP2040/RP2350)`)
+- A microcontroller (Currently supported platform:`Arduino`, `STM32`, `ESP32`, `nRF52`,`rpi-pico(RP2040/RP2350)`)
 - SPI driver for your target MCU
+
+> ESP32 support uses the custom [`esp32-rv-bare-metal-sdk`](https://github.com/pdlsurya/esp32-rv-bare-metal-sdk) platform layer and is intended for ESP32 RISC-V targets such as ESP32-C6 and ESP32-P4.
 
 ### Integration
 
@@ -30,7 +32,7 @@ A lightweight FAT32 driver for microcontrollers interfacing with SD cards over S
 - ***Add the src/ folder***:
   Include the src/ folder of the SdFat32 library into your project. This contains the core source files required to use the library.
 - ***Add your platform/ folder***:
-Include the folder that matches your platform (e.g., `platform/rpi-pico/`, `platform/stm32/`, etc.) along with the source file inside it. This contains platform-specific implementations needed for SdFat32 to work properly on your hardware.
+Include the folder that matches your platform (e.g., `platform/rpi-pico/`, `platform/stm32/`, `platform/esp32/`, etc.) along with the source file inside it. This contains platform-specific implementations needed for SdFat32 to work properly on your hardware.
 
 3. **Initialize and use the driver**:
 
