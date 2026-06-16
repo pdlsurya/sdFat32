@@ -18,7 +18,7 @@ A lightweight FAT32 driver for microcontrollers interfacing with SD cards over S
 - A microcontroller (Currently supported platform:`Arduino`, `STM32`, `ESP32`, `nRF52`,`rpi-pico(RP2040/RP2350)`)
 - SPI driver for your target MCU
 
-> ESP32 support uses the custom [`esp32-rv-bare-metal-sdk`](https://github.com/pdlsurya/esp32-rv-bare-metal-sdk) platform layer and is intended for ESP32 RISC-V targets such as ESP32-C6 and ESP32-P4.
+> ESP32 support uses the custom [`esp32-riscv-bare-metal-sdk`](https://github.com/pdlsurya/esp32-riscv-bare-metal-sdk) platform layer and is intended for ESP32 RISC-V targets such as ESP32-C6 and ESP32-P4.
 
 ### Integration
 
